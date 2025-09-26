@@ -1,0 +1,43 @@
+{
+  "name": "ui",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "cross-env NODE_ENV=development yarn run shim && vite",
+    "build": "cross-env NODE_ENV=production yarn run shim && vite build",
+    "build:local": "cross-env NODE_ENV=local yarn run shim && vite build && cross-env ZIP=true yarn run local",
+    "build:local:unzip": "cross-env NODE_ENV=local yarn run shim && vite build && yarn run local",
+    "preview": "vite preview",
+    "test:unit": "vitest",
+    "lint": "eslint . --ext .vue,.js,.jsx,.cjs,.mjs --fix --ignore-path .gitignore",
+    "format": "prettier --write src/",
+    "shim": "node build/fxupdate.js",
+    "local": "node build/local.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.7",
+    "pinia": "^2.1.7",
+    "vue": "^3.4.15",
+    "vue-router": "^4.2.5"
+  },
+  "devDependencies": {
+    "@rushstack/eslint-patch": "^1.3.3",
+    "@vitejs/plugin-vue": "^5.0.3",
+    "@vue/eslint-config-prettier": "^8.0.0",
+    "@vue/test-utils": "^2.4.4",
+    "archiver": "^7.0.0",
+    "autoprefixer": "^10.4.18",
+    "colors": "^1.4.0",
+    "cross-env": "^7.0.3",
+    "eslint": "^8.49.0",
+    "eslint-plugin-vue": "^9.17.0",
+    "jsdom": "^24.0.0",
+    "postcss": "^8.4.35",
+    "prettier": "^3.0.3",
+    "sass": "^1.71.1",
+    "tailwindcss": "^3.4.1",
+    "vite": "^5.0.11",
+    "vitest": "^1.2.2"
+  }
+}
