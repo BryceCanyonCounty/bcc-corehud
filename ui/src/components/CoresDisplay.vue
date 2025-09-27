@@ -6,9 +6,13 @@ import CoreSlot from './CoreSlot.vue'
   <div class="core-display">
     <CoreSlot type="health" />
     <CoreSlot type="stamina" />
+    <CoreSlot type="hunger" />
+    <CoreSlot type="thirst" />
+    <CoreSlot type="stress" />
+    <CoreSlot type="horse_dirt" />
     <CoreSlot type="horse_health" />
     <CoreSlot type="horse_stamina" />
-    <CoreSlot type="horse_dirt" />
+    <CoreSlot type="voice" />
     <CoreSlot type="temperature" />
 
     <!-- Optional debug output (dev only!) -->
@@ -24,6 +28,6 @@ import CoreSlot from './CoreSlot.vue'
 <style scoped>
 .core-display {
   display: flex;
-  gap: 1rem;
+  gap: 0.75rem;
 }
 </style>

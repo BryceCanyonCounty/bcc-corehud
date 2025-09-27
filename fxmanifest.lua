@@ -13,7 +13,8 @@ shared_scripts {
     'locale.lua'
 }
 
-client_script {
+client_scripts {
+    'client/MenuSetup.lua',
     'client/client.lua'
 }
 

@@ -1,8 +1,6 @@
 <script setup>
 import { inject, computed } from 'vue'
 import CoreIcon from './CoreIcon.vue'
-import CoreMeter from './CoreMeter.vue'
-import CoreEffect from './CoreEffect.vue'
 
 const props = defineProps({
   type: { type: String, required: true }
@@ -16,19 +14,31 @@ const slotData = computed(() => {
     return null
   }
 
+  const effectInside = typeof source.effectInside === 'string' ? source.effectInside : null
+
+  if (props.type === 'temperature') {
+    const lowered = effectInside ? effectInside.toLowerCase() : null
+    if (lowered !== 'hot' && lowered !== 'cold') {
+      return null
+    }
+  }
+
   return {
     inner: typeof source.inner === 'number' ? source.inner : 15,
     outer: typeof source.outer === 'number' ? source.outer : 99,
-    effectInside: typeof source.effectInside === 'string' ? source.effectInside : null,
+    effectInside,
     effectNext: typeof source.effectNext === 'string' ? source.effectNext : null
   }
 })
 </script>
 
 <template>
-  <div v-if="slotData" class="relative w-14 h-14">
-    <CoreIcon :type="type" :value="slotData.inner" :effect="slotData.effectInside" />
-    <CoreEffect :effect="slotData.effectNext" />
-    <CoreMeter :value="slotData.outer" />
-  </div>
+  <CoreIcon
+    v-if="slotData"
+    :type="type"
+    :inner="slotData.inner"
+    :outer="slotData.outer"
+    :effect-inside="slotData.effectInside"
+    :effect-next="slotData.effectNext"
+  />
 </template>

@@ -12,6 +12,10 @@ const DEFAULT_SLOT = Object.freeze({
 const createDefaultCores = () => ({
   health: { ...DEFAULT_SLOT },
   stamina: { ...DEFAULT_SLOT },
+  hunger: null,
+  thirst: null,
+  stress: null,
+  voice: null,
   horse_health: null,
   horse_stamina: null,
   horse_dirt: null,
@@ -19,10 +23,37 @@ const createDefaultCores = () => ({
 })
 
 const cores = ref(createDefaultCores())
-const visible = ref(true)
+const visible = ref(false)
 const devmode = ref(false)
 
 provide('cores', readonly(cores))
+
+const DEFAULT_PALETTE_ENTRY = Object.freeze({
+  accent: '#ffffff',
+  icon: '#ffffff',
+  background: '#0c1018',
+  track: 'rgba(17, 24, 39, 0.85)',
+  border: '#1f2937',
+  shadow: '0 18px 28px rgba(8, 13, 23, 0.45)'
+})
+
+const createDefaultPalette = () => ({
+  default: { ...DEFAULT_PALETTE_ENTRY },
+  health: { ...DEFAULT_PALETTE_ENTRY },
+  stamina: { ...DEFAULT_PALETTE_ENTRY },
+  hunger: { ...DEFAULT_PALETTE_ENTRY },
+  thirst: { ...DEFAULT_PALETTE_ENTRY },
+  stress: { ...DEFAULT_PALETTE_ENTRY },
+  temperature: { ...DEFAULT_PALETTE_ENTRY },
+  horse_health: { ...DEFAULT_PALETTE_ENTRY },
+  horse_stamina: { ...DEFAULT_PALETTE_ENTRY },
+  horse_dirt: { ...DEFAULT_PALETTE_ENTRY },
+  voice: { ...DEFAULT_PALETTE_ENTRY }
+})
+
+const palette = ref(createDefaultPalette())
+
+provide('palette', readonly(palette))
 
 const clamp = (value, min, max, fallback) => {
   if (typeof value !== 'number' || Number.isNaN(value)) {
@@ -34,14 +65,23 @@ const clamp = (value, min, max, fallback) => {
 const normalizeCore = (payload, mapping) => {
   const inner = payload?.[mapping.inner]
   const outer = payload?.[mapping.outer]
-  const effectInside = payload?.[mapping.effectInside]
-  const effectNext = payload?.[mapping.effectNext]
 
-  const hasData =
+  const effectInsideKey = typeof mapping.effectInside === 'string' ? mapping.effectInside : null
+  const effectNextKey = typeof mapping.effectNext === 'string' ? mapping.effectNext : null
+
+  const effectInside = effectInsideKey ? payload?.[effectInsideKey] : null
+  const effectNext = effectNextKey ? payload?.[effectNextKey] : null
+
+  const hasNumbers =
     typeof inner === 'number' ||
-    typeof outer === 'number' ||
+    typeof outer === 'number'
+
+  const hasEffect =
     typeof effectInside === 'string' ||
     typeof effectNext === 'string'
+
+  const requireEffect = mapping.requireEffect === true
+  const hasData = requireEffect ? hasEffect : (hasNumbers || hasEffect)
 
   if (!hasData) {
     return null
@@ -68,6 +108,30 @@ const CORE_MAP = {
     effectInside: 'effect_stamina_inside',
     effectNext: 'effect_stamina_next'
   },
+  hunger: {
+    inner: 'innerhunger',
+    outer: 'outerhunger',
+    effectInside: 'effect_hunger_inside',
+    effectNext: 'effect_hunger_next'
+  },
+  thirst: {
+    inner: 'innerthirst',
+    outer: 'outerthirst',
+    effectInside: 'effect_thirst_inside',
+    effectNext: 'effect_thirst_next'
+  },
+  stress: {
+    inner: 'innerstress',
+    outer: 'outerstress',
+    effectInside: 'effect_stress_inside',
+    effectNext: 'effect_stress_next'
+  },
+  voice: {
+    inner: 'innervoice',
+    outer: 'outervoice',
+    effectInside: 'effect_voice_inside',
+    effectNext: 'effect_voice_next'
+  },
   horse_health: {
     inner: 'innerhorse_health',
     outer: 'outerhorse_health',
@@ -84,7 +148,8 @@ const CORE_MAP = {
     inner: 'innerhorse_dirt',
     outer: 'outerhorse_dirt',
     effectInside: 'effect_horse_dirt_inside',
-    effectNext: 'effect_horse_dirt_next'
+    effectNext: 'effect_horse_dirt_next',
+    requireEffect: true
   },
   temperature: {
     inner: 'innertemperature',
@@ -96,9 +161,11 @@ const CORE_MAP = {
 
 const setCores = (corePayload) => {
   const next = {}
+  const alwaysVisible = ['health', 'stamina', 'hunger', 'thirst', 'stress']
+
   for (const key of Object.keys(CORE_MAP)) {
     next[key] = normalizeCore(corePayload, CORE_MAP[key])
-      || (key === 'health' || key === 'stamina' ? { ...DEFAULT_SLOT } : null)
+      || (alwaysVisible.includes(key) ? { ...DEFAULT_SLOT } : null)
   }
   cores.value = next
 }
@@ -119,6 +186,25 @@ const handleMessage = (event) => {
     case 'toggle':
       if (typeof data.visible === 'boolean') {
         visible.value = data.visible
+      }
+      break
+
+    case 'palette':
+      if (data.palette && typeof data.palette === 'object') {
+        const next = createDefaultPalette()
+        for (const [key, value] of Object.entries(data.palette)) {
+          if (!value || typeof value !== 'object') {
+            continue
+          }
+
+          if (!next[key]) {
+            next[key] = { ...DEFAULT_PALETTE_ENTRY }
+          }
+
+          next[key] = { ...next[key], ...value }
+        }
+
+        palette.value = next
       }
       break
 

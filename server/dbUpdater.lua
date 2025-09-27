@@ -1,6 +1,8 @@
 local saveEnabled = Config.SaveToDatabase ~= false
 local autoCreate = Config.AutoCreateTable ~= false
 local tableName = Config.DatabaseTable or 'bcc_corehud'
+local paletteTableName = Config.PaletteTable or 'bcc_corehud_palette'
+local autoCreatePalette = Config.AutoCreatePaletteTable ~= false
 
 if saveEnabled and autoCreate then
     CreateThread(function()
@@ -67,6 +69,29 @@ if saveEnabled and autoCreate then
             end
 
             print('^2[BCC-CoreHUD]^0 Database table `' .. tableName .. '` verified.')
+
+            if autoCreatePalette then
+                if type(paletteTableName) ~= 'string' or paletteTableName == '' or paletteTableName:find('[^%w_]') then
+                    print('^1[BCC-CoreHUD]^0 Invalid Config.PaletteTable value. Skipping palette table creation.')
+                else
+                    local paletteQuery = string.format([[CREATE TABLE IF NOT EXISTS `%s` (
+                        `character_id` VARCHAR(64) NOT NULL,
+                        `palette_json` LONGTEXT NULL,
+                        `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        PRIMARY KEY (`character_id`)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;]], paletteTableName)
+
+                    local okPalette, errPalette = pcall(function()
+                        MySQL.query.await(paletteQuery)
+                    end)
+
+                    if okPalette then
+                        print('^2[BCC-CoreHUD]^0 Palette table `' .. paletteTableName .. '` verified.')
+                    else
+                        print('^1[BCC-CoreHUD]^0 Failed to create palette table `' .. paletteTableName .. '`:', errPalette)
+                    end
+                end
+            end
         else
             print('^1[BCC-CoreHUD]^0 Failed to create table `' .. tableName .. '`:', err)
         end

@@ -14,7 +14,23 @@ end
 
 local saveEnabled = Config.SaveToDatabase ~= false
 local tableName = Config.DatabaseTable or 'bcc_corehud'
+local paletteTableName = Config.PaletteTable or 'bcc_corehud_palette'
 local persistQuery = nil
+local paletteSaveQuery = nil
+local paletteLoadQuery = nil
+
+local PALETTE_KEYS = {
+    'health',
+    'stamina',
+    'hunger',
+    'thirst',
+    'stress',
+    'temperature',
+    'horse_health',
+    'horse_stamina',
+    'horse_dirt',
+    'voice'
+}
 
 if type(tableName) ~= 'string' or tableName == '' or tableName:find('[^%w_]') then
     print('^1[BCC-CoreHUD]^0 Invalid Config.DatabaseTable value. Disabling database persistence.')
@@ -56,6 +72,71 @@ if saveEnabled then
             horse_active = VALUES(horse_active)
     ]], tableName)
 
+    if type(paletteTableName) ~= 'string' or paletteTableName == '' or paletteTableName:find('[^%w_]') then
+        print('^1[BCC-CoreHUD]^0 Invalid Config.PaletteTable value. Palette persistence disabled.')
+    else
+        paletteSaveQuery = string.format([[INSERT INTO `%s` (character_id, palette_json)
+            VALUES (?, ?)
+            ON DUPLICATE KEY UPDATE
+                palette_json = VALUES(palette_json)
+        ]], paletteTableName)
+
+        paletteLoadQuery = string.format('SELECT palette_json FROM `%s` WHERE character_id = ? LIMIT 1', paletteTableName)
+    end
+
+end
+
+local function getCharacterIdFromSource(src)
+    local user = VORPcore and VORPcore.getUser(src)
+    if not user or not user.getUsedCharacter then
+        return nil
+    end
+
+    local character = user.getUsedCharacter
+    if not character or not character.charIdentifier then
+        return nil
+    end
+
+    local charId = tostring(character.charIdentifier)
+    if charId == '' then
+        return nil
+    end
+
+    return charId
+end
+
+local function sanitizePaletteSnapshot(snapshot)
+    if type(snapshot) ~= 'table' then
+        return nil
+    end
+
+    local result = {}
+
+    for _, key in ipairs(PALETTE_KEYS) do
+        local entry = snapshot[key]
+        if type(entry) == 'table' then
+            local hue = tonumber(entry.hue) or 0
+            local saturation = tonumber(entry.saturation) or 0
+            result[key] = {
+                hue = math.max(0, math.min(360, math.floor(hue + 0.5))),
+                saturation = math.max(0, math.min(100, math.floor(saturation + 0.5)))
+            }
+        end
+    end
+
+    local defaultEntry = snapshot.default
+    if type(defaultEntry) == 'table' then
+        result.default = {
+            hue = math.max(0, math.min(360, math.floor((tonumber(defaultEntry.hue) or 0) + 0.5))),
+            saturation = math.max(0, math.min(100, math.floor((tonumber(defaultEntry.saturation) or 0) + 0.5)))
+        }
+    end
+
+    if not result.default then
+        result.default = { hue = 0, saturation = 0 }
+    end
+
+    return result
 end
 
 local function toBoundedNumber(value, minValue, maxValue, defaultValue)
@@ -85,18 +166,8 @@ RegisterNetEvent('bcc-corehud:saveCores', function(snapshot)
     end
 
     local src = source
-    local user = VORPcore and VORPcore.getUser(src)
-    if not user or not user.getUsedCharacter then
-        return
-    end
-
-    local character = user.getUsedCharacter
-    if not character or not character.charIdentifier then
-        return
-    end
-
-    local charId = tostring(character.charIdentifier)
-    if not charId or charId == '' then
+    local charId = getCharacterIdFromSource(src)
+    if not charId then
         return
     end
 
@@ -153,4 +224,66 @@ RegisterNetEvent('bcc-corehud:saveCores', function(snapshot)
     if not ok then
         print(string.format('^1[BCC-CoreHUD]^0 Failed to persist core snapshot for character %s: %s', charId, err or 'unknown error'))
     end
+end)
+
+RegisterNetEvent('bcc-corehud:palette:save', function(snapshot)
+    if not saveEnabled or not paletteSaveQuery or type(snapshot) ~= 'table' then
+        return
+    end
+
+    local src = source
+    local charId = getCharacterIdFromSource(src)
+    if not charId then
+        return
+    end
+
+    local sanitized = sanitizePaletteSnapshot(snapshot)
+    if not sanitized then
+        return
+    end
+
+    local encoded = json.encode(sanitized)
+    local ok, err = pcall(MySQL.prepare.await, paletteSaveQuery, { charId, encoded })
+    if not ok then
+        print(string.format('^1[BCC-CoreHUD]^0 Failed to persist palette for character %s: %s', charId,
+            err or 'unknown error'))
+    end
+end)
+
+RegisterNetEvent('bcc-corehud:palette:request', function()
+    local src = source
+
+    if not saveEnabled or not paletteLoadQuery then
+        TriggerClientEvent('bcc-corehud:palette:apply', src, nil)
+        return
+    end
+
+    local charId = getCharacterIdFromSource(src)
+    if not charId then
+        TriggerClientEvent('bcc-corehud:palette:apply', src, nil)
+        return
+    end
+
+    local ok, result = pcall(MySQL.prepare.await, paletteLoadQuery, { charId })
+    if not ok then
+        print(string.format('^1[BCC-CoreHUD]^0 Failed to fetch palette for character %s: %s', charId,
+            result or 'unknown error'))
+        TriggerClientEvent('bcc-corehud:palette:apply', src, nil)
+        return
+    end
+
+    local row = result
+    if type(result) == 'table' and result[1] then
+        row = result[1]
+    end
+
+    local payload = nil
+    if type(row) == 'table' and row.palette_json and row.palette_json ~= '' then
+        local okDecode, decoded = pcall(json.decode, row.palette_json)
+        if okDecode and type(decoded) == 'table' then
+            payload = sanitizePaletteSnapshot(decoded)
+        end
+    end
+
+    TriggerClientEvent('bcc-corehud:palette:apply', src, payload)
 end)
