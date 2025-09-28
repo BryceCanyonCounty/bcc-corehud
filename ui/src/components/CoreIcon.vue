@@ -9,7 +9,8 @@ const props = defineProps({
   inner: { type: Number, default: 0 },
   outer: { type: Number, default: 0 },
   effectInside: { type: String, default: null },
-  effectNext: { type: String, default: null }
+  effectNext: { type: String, default: null },
+  meta: { type: Object, default: null }
 })
 
 const ICON_CLASS_MAP = {
@@ -20,8 +21,9 @@ const ICON_CLASS_MAP = {
   stress: 'fa-solid fa-face-tired',
   horse_health: 'fa-solid fa-horse',
   horse_stamina: 'fa-solid fa-horse-head',
-  horse_dirt: 'fa-solid fa-broom',
+  horse_dirt: null,
   voice: 'fa-solid fa-microphone-lines',
+  temperature_value: null,
   default: 'fa-solid fa-circle'
 }
 
@@ -151,23 +153,100 @@ const iconClass = computed(() => {
     return null
   }
 
-  if (props.type === 'temperature') {
+  const entry = ICON_CLASS_MAP[props.type]
+  if (entry === null) {
     return null
   }
-
-  const entry = ICON_CLASS_MAP[props.type]
-  if (entry) {
+  if (typeof entry === 'string' && entry.length > 0) {
     return entry
   }
 
   return ICON_CLASS_MAP.default
 })
-const accentColor = computed(() => paletteEntry.value.accent)
-const iconColor = computed(() => paletteEntry.value.icon)
-const backgroundColor = computed(() => paletteEntry.value.background)
-const trackColor = computed(() => paletteEntry.value.track)
+const toClampedPercent = (value) => {
+  const numeric = Number(value)
+  if (!Number.isFinite(numeric)) {
+    return null
+  }
+  return Math.min(Math.max(numeric, 0), 100)
+}
+
+const voiceMeta = computed(() => {
+  if (props.type !== 'voice' || !props.meta || typeof props.meta !== 'object') {
+    return null
+  }
+
+  const talking = props.meta.talking === true || props.meta.talking === 1 || props.meta.talking === 'true'
+  const proximityPercent = toClampedPercent(props.meta.proximityPercent ?? props.meta.proximity)
+
+  return {
+    talking,
+    proximityPercent
+  }
+})
+
+const computeVoiceAccent = (percent) => {
+  if (percent === null) {
+    return null
+  }
+
+  const hue = Math.max(0, Math.min(120, 120 - (percent * 1.2)))
+  return `hsl(${Math.round(hue)}, 85%, 60%)`
+}
+
+const accentColor = computed(() => {
+  if (props.type === 'voice') {
+    const meta = voiceMeta.value
+    if (meta?.talking) {
+      const accent = computeVoiceAccent(meta.proximityPercent)
+      if (accent) {
+        return accent
+      }
+    }
+  }
+  return paletteEntry.value.accent
+})
+
+const trackColor = computed(() => {
+  if (props.type === 'voice') {
+    const meta = voiceMeta.value
+    if (meta?.talking) {
+      return 'rgba(30, 58, 138, 0.55)'
+    }
+  }
+  return paletteEntry.value.track
+})
+
+const backgroundColor = computed(() => {
+  if (props.type === 'voice') {
+    const meta = voiceMeta.value
+    if (meta?.talking) {
+      return 'rgba(12, 18, 28, 0.9)'
+    }
+  }
+  return paletteEntry.value.background
+})
+
 const borderColor = computed(() => paletteEntry.value.border)
 const iconShadow = computed(() => paletteEntry.value.shadow)
+const iconColor = computed(() => {
+  if (props.type === 'voice' && voiceMeta.value?.talking) {
+    return '#f8fafc'
+  }
+  return paletteEntry.value.icon
+})
+
+const coreSlotClasses = computed(() => {
+  if (props.type !== 'voice') {
+    return ['core-slot']
+  }
+
+  const classes = ['core-slot']
+  if (voiceMeta.value?.talking) {
+    classes.push('core-slot--voice-talking')
+  }
+  return classes
+})
 
 const clampPercent = (value, max) => {
   const numeric = typeof value === 'number' ? value : 0
@@ -184,18 +263,23 @@ const outerDashOffset = computed(
 
 const coreFillStyle = computed(() => {
   return {
-    backgroundColor: '#0c1018',              // dark background
-    boxShadow: `inset 0 0 0 1.4px #1f2937`, // dark border
-    color: '#ffffff'                        // white icon/text if needed
+    backgroundColor: backgroundColor.value,
+    boxShadow: `inset 0 0 0 1.4px ${borderColor.value}`,
+    color: iconColor.value
   }
 })
 
-const effectLabel = computed(() => props.effectInside || props.effectNext || '')
+const centerLabel = computed(() => {
+  if (props.type === 'temperature_value' && typeof props.effectNext === 'string' && props.effectNext.length > 0) {
+    return props.effectNext
+  }
+  return null
+})
 </script>
 
 <template>
   <div
-    class="core-slot"
+    :class="coreSlotClasses"
     :style="{
       '--accent-color': accentColor,
       '--icon-color': iconColor,
@@ -231,27 +315,42 @@ const effectLabel = computed(() => props.effectInside || props.effectNext || '')
       draggable="false"
     />
     <i v-else-if="iconClass" class="core-icon" :class="iconClass" aria-hidden="true"></i>
-
-    <span v-if="effectLabel" class="core-effect">{{ effectLabel }}</span>
+    <span v-if="centerLabel" class="core-icon-label">{{ centerLabel }}</span>
   </div>
 </template>
 
 <style scoped>
 .core-slot {
   position: relative;
-  width: 3.65rem;
-  height: 3.65rem;
+  width: 2.65rem;
+  height: 2.65rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border-radius: 9999px;
   filter: drop-shadow(0 8px 16px rgba(15, 23, 42, 0.35));
+  transform-origin: center;
+  will-change: transform;
   --accent-color: #ffffff;
   --icon-color: #ffffff;
   --track-color: rgba(17, 24, 39, 0.85);
   --inner-bg: #0c1018;
   --icon-shadow: 0 4px 8px rgba(8, 13, 23, 0.6);
   --inner-border: #1f2937;
+}
+
+.core-slot--voice-talking {
+  animation: voicePulse 1.05s ease-in-out infinite;
+}
+
+@keyframes voicePulse {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.08);
+  }
 }
 
 .core-gauge {
@@ -286,7 +385,7 @@ const effectLabel = computed(() => props.effectInside || props.effectNext || '')
 .core-icon {
   position: relative;
   z-index: 1;
-  font-size: 2.1rem;
+  font-size: 1.65rem;
   color: var(--icon-color);
   text-shadow: var(--icon-shadow);
 }
@@ -294,8 +393,8 @@ const effectLabel = computed(() => props.effectInside || props.effectNext || '')
 .core-icon-img {
   position: relative;
   z-index: 1;
-  width: 3.65rem;
-  height:3.65rem;
+  width: 2.65rem;
+  height:2.65rem;
   object-fit: contain;
   box-shadow: var(--icon-shadow);
   border-radius: 50%;
@@ -303,13 +402,17 @@ const effectLabel = computed(() => props.effectInside || props.effectNext || '')
   pointer-events: none;
 }
 
-.core-effect {
+.core-icon-label {
   position: absolute;
-  bottom: -0.55rem;
-  font-size: 0.6rem;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.58rem;
   font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: rgba(55, 65, 81, 0.75);
+  letter-spacing: 0.03em;
+  color: #e2e8f0;
+  text-shadow: 0 1px 2px rgba(15, 23, 42, 0.7);
+  pointer-events: none;
 }
 </style>

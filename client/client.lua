@@ -11,6 +11,7 @@ if horseDirtyThreshold == nil then
     horseDirtyThreshold = 4
 end
 
+
 local coldTempThreshold = config.TemperatureColdThreshold
 if coldTempThreshold == false then
     coldTempThreshold = nil
@@ -29,6 +30,9 @@ end
 local showTemperatureAlways = config.AlwaysShowTemperature ~= false
 local temperatureMin = type(config.TemperatureMin) == 'number' and config.TemperatureMin or -15.0
 local temperatureMax = type(config.TemperatureMax) == 'number' and config.TemperatureMax or 40.0
+local temperatureHotDamagePerSecond = math.max(0.0, tonumber(config.HotTemperatureDamagePerSecond) or 0.0)
+local temperatureColdDamagePerSecond = math.max(0.0, tonumber(config.ColdTemperatureDamagePerSecond) or 0.0)
+local temperatureDamageDelay = math.max(0.0, tonumber(config.TemperatureDamageDelay) or 5.0)
 
 local needsResourceName = config.NeedsResourceName
 if type(needsResourceName) ~= 'string' or needsResourceName == '' then
@@ -50,6 +54,8 @@ if PaletteMenu and PaletteMenu.Init then
 end
 
 local hudVisible = nil
+local hudPreference = autoShowHud
+local hudSuppressed = false
 local lastPersistTick = 0
 local lastPersistedSnapshot = nil
 local needsErrorLogged = false
@@ -70,26 +76,16 @@ local REQUIRED_PERSIST_NUMBERS = {
 }
 
 local OPTIONAL_PERSIST_NUMBERS = {
+    { key = 'outerhunger', min = 0, max = 99 },
+    { key = 'outerthirst', min = 0, max = 99 },
+    { key = 'outerstress', min = 0, max = 99 },
     { key = 'innerhorse_health', min = 0, max = 15 },
     { key = 'outerhorse_health', min = 0, max = 99 },
     { key = 'innerhorse_stamina', min = 0, max = 15 },
-    { key = 'outerhorse_stamina', min = 0, max = 99 },
-    { key = 'innerhorse_dirt', min = 0, max = 15 },
-    { key = 'outerhorse_dirt', min = 0, max = 99 },
-    { key = 'innertemperature', min = 0, max = 15 },
-    { key = 'outertemperature', min = 0, max = 99 }
+    { key = 'outerhorse_stamina', min = 0, max = 99 }
 }
 
-local PERSIST_STRINGS = {
-    'effect_health_inside',
-    'effect_stamina_inside',
-    'effect_horse_health_inside',
-    'effect_horse_stamina_inside',
-    'effect_horse_dirt_inside',
-    'effect_horse_dirt_next',
-    'effect_temperature_inside',
-    'effect_temperature_next'
-}
+local PERSIST_STRINGS = {}
 
 local encodeJson = (json and json.encode) or function(value)
     return tostring(value)
@@ -151,6 +147,13 @@ if hotThirstMultiplier < 1.0 then
     hotThirstMultiplier = 1.0
 end
 local hotThirstBypassDelay = config.HotThirstBypassDelay ~= false
+local crossNeedDecayMultiplier = tonumber(config.CrossNeedDecayMultiplier) or 1.5
+if crossNeedDecayMultiplier < 1.0 then
+    crossNeedDecayMultiplier = 1.0
+end
+local starvationDamageDelay = math.max(0.0, tonumber(config.StarvationDamageDelay) or 0.0)
+local starvationDamageInterval = math.max(0.0, tonumber(config.StarvationDamageInterval) or 10.0)
+local starvationDamageAmount = math.max(0.0, tonumber(config.StarvationDamageAmount) or 4.0)
 
 local function asPercent(value)
     if value == nil then
@@ -191,6 +194,84 @@ local function mapTemperatureToPercent(temperature)
 
     local normalised = (temperature - minTemp) / span
     return clamp(normalised * 100.0, 0.0, 100.0)
+end
+
+local function computeActivityMultipliers()
+    local hungerMultiplier = 1.0
+    local thirstMultiplier = 1.0
+
+    local ped = PlayerPedId()
+    if ped == 0 then
+        return hungerMultiplier, thirstMultiplier
+    end
+
+    local function applyIdleModifiers()
+        hungerMultiplier = hungerMultiplier * 0.7
+        thirstMultiplier = thirstMultiplier * 0.75
+    end
+
+    local function applyWalkingModifiers()
+        hungerMultiplier = hungerMultiplier * 1.0
+        thirstMultiplier = thirstMultiplier * 1.1
+    end
+
+    local function applyRunningModifiers()
+        hungerMultiplier = hungerMultiplier * 1.25
+        thirstMultiplier = thirstMultiplier * 1.6
+    end
+
+    local function applySprintingModifiers()
+        hungerMultiplier = hungerMultiplier * 1.5
+        thirstMultiplier = thirstMultiplier * 2.2
+    end
+
+    if IsPedOnMount(ped) then
+        local mount = GetMount(ped)
+        local mountSpeed = 0.0
+        if mount ~= 0 then
+            mountSpeed = GetEntitySpeed(mount)
+        end
+
+        if mountSpeed < 0.25 then
+            applyIdleModifiers()
+        elseif mountSpeed < 3.0 then
+            applyWalkingModifiers()
+        elseif mountSpeed < 6.5 then
+            applyRunningModifiers()
+        else
+            applySprintingModifiers()
+        end
+    else
+        local speed = GetEntitySpeed(ped)
+
+        if speed < 0.25 then
+            applyIdleModifiers()
+        elseif IsPedSprinting(ped) then
+            applySprintingModifiers()
+        elseif IsPedRunning(ped) then
+            applyRunningModifiers()
+        elseif IsPedWalking(ped) then
+            applyWalkingModifiers()
+        else
+            hungerMultiplier = hungerMultiplier * 0.85
+            thirstMultiplier = thirstMultiplier * 0.9
+        end
+    end
+
+    if IsPedSwimming(ped) or IsPedSwimmingUnderWater(ped) then
+        hungerMultiplier = hungerMultiplier + 0.4
+        thirstMultiplier = thirstMultiplier + 1.2
+    end
+
+    if hungerMultiplier < 0.1 then
+        hungerMultiplier = 0.1
+    end
+
+    if thirstMultiplier < 0.1 then
+        thirstMultiplier = 0.1
+    end
+
+    return hungerMultiplier, thirstMultiplier
 end
 
 local function getWorldTemperature()
@@ -236,6 +317,11 @@ local localNeedsState = {
 
 local needsDecayTrackers = {}
 local currentTemperatureEffect = nil
+local starvationTimer = 0.0
+local starvationElapsed = 0.0
+local starvationDelaySatisfied = false
+local temperatureDamageTimer = 0.0
+local hudLayoutEditing = false
 
 local function getDecayDuration(stat)
     if stat == 'hunger' then
@@ -299,10 +385,115 @@ local function setLocalNeedValue(stat, value, options)
     end
 end
 
+local function applyStarvationDamage()
+    if starvationDamageAmount <= 0.0 then
+        return
+    end
+
+    local ped = PlayerPedId()
+    if ped == 0 or IsEntityDead(ped) then
+        return
+    end
+
+    local currentHealth = GetEntityHealth(ped)
+    if not currentHealth or currentHealth <= 0 then
+        return
+    end
+
+    local damage = math.floor(starvationDamageAmount + 0.5)
+    if damage <= 0 then
+        return
+    end
+
+    local newHealth = currentHealth - damage
+    if newHealth < 0 then
+        newHealth = 0
+    end
+
+    SetEntityHealth(ped, newHealth)
+end
+
+local function applyTemperatureDamage(deltaSeconds)
+    if temperatureHotDamagePerSecond <= 0.0 and temperatureColdDamagePerSecond <= 0.0 then
+        temperatureDamageTimer = 0.0
+        return
+    end
+
+    local ped = PlayerPedId()
+    if ped == 0 or IsEntityDead(ped) then
+        temperatureDamageTimer = 0.0
+        return
+    end
+
+    local effect = currentTemperatureEffect
+    if effect ~= 'hot' and effect ~= 'cold' then
+        temperatureDamageTimer = 0.0
+        return
+    end
+
+    local damagePerSecond = effect == 'hot' and temperatureHotDamagePerSecond or temperatureColdDamagePerSecond
+    if damagePerSecond <= 0.0 then
+        temperatureDamageTimer = 0.0
+        return
+    end
+
+    temperatureDamageTimer = temperatureDamageTimer + deltaSeconds
+    if temperatureDamageTimer < temperatureDamageDelay then
+        return
+    end
+
+    local currentHealth = GetEntityHealth(ped)
+    if not currentHealth or currentHealth <= 0 then
+        return
+    end
+
+    local damage = damagePerSecond * deltaSeconds
+    if damage <= 0.05 then
+        return
+    end
+
+    SetEntityHealth(ped, math.max(0, currentHealth - damage))
+end
+
+local function sendLayoutToNui(payload)
+    SendNUIMessage({
+        type = 'layout',
+        positions = payload or {}
+    })
+end
+
+local function setLayoutEditing(enabled, options)
+    local shouldEnable = enabled == true
+    local skipSave = type(options) == 'table' and options.skipSave == true
+
+    if hudLayoutEditing == shouldEnable then
+        if not shouldEnable then
+            SendNUIMessage({ type = 'layoutEdit', editing = false })
+        end
+        return
+    end
+
+    hudLayoutEditing = shouldEnable
+    SetNuiFocus(shouldEnable, shouldEnable)
+    SendNUIMessage({ type = 'layoutEdit', editing = shouldEnable })
+
+    if not shouldEnable and not skipSave then
+        SendNUIMessage({ type = 'layoutRequestSave' })
+    end
+end
+
+local function requestLayoutFromServer()
+    TriggerServerEvent('bcc-corehud:layout:request')
+end
+
 local function processNeedsDecay(deltaSeconds)
     if not autoDecayActive then
         return
     end
+
+    local isHungerEmpty = localNeedsState.hunger ~= nil and localNeedsState.hunger <= 0.0
+    local isThirstEmpty = localNeedsState.thirst ~= nil and localNeedsState.thirst <= 0.0
+    local hungerActivityMultiplier, thirstActivityMultiplier = computeActivityMultipliers()
 
     for _, stat in ipairs({ 'hunger', 'thirst' }) do
         local current = localNeedsState[stat]
@@ -318,6 +509,18 @@ local function processNeedsDecay(deltaSeconds)
                             tracker.delay = 0
                         end
                         decayMultiplier = hotThirstMultiplier
+                    end
+
+                    if stat == 'hunger' and isThirstEmpty then
+                        decayMultiplier = decayMultiplier * crossNeedDecayMultiplier
+                    elseif stat == 'thirst' and isHungerEmpty then
+                        decayMultiplier = decayMultiplier * crossNeedDecayMultiplier
+                    end
+
+                    if stat == 'hunger' then
+                        decayMultiplier = decayMultiplier * hungerActivityMultiplier
+                    else
+                        decayMultiplier = decayMultiplier * thirstActivityMultiplier
                     end
 
                     if tracker.delay and tracker.delay > 0 then
@@ -340,6 +543,43 @@ local function processNeedsDecay(deltaSeconds)
             end
         end
     end
+
+    if starvationDamageAmount > 0.0 then
+        if isHungerEmpty and isThirstEmpty then
+            starvationElapsed = starvationElapsed + deltaSeconds
+
+            if starvationElapsed >= starvationDamageDelay then
+                if not starvationDelaySatisfied then
+                    starvationDelaySatisfied = true
+                    if starvationDamageInterval > 0.0 then
+                        starvationTimer = starvationDamageInterval
+                    end
+                end
+
+                if starvationDamageInterval <= 0.0 then
+                    applyStarvationDamage()
+                else
+                    starvationTimer = starvationTimer + deltaSeconds
+                    if starvationTimer >= starvationDamageInterval then
+                        starvationTimer = starvationTimer - starvationDamageInterval
+                        applyStarvationDamage()
+                    end
+                end
+            else
+                starvationTimer = 0.0
+            end
+        else
+            starvationElapsed = 0.0
+            starvationTimer = 0.0
+            starvationDelaySatisfied = false
+        end
+    else
+        starvationElapsed = 0.0
+        starvationTimer = 0.0
+        starvationDelaySatisfied = false
+    end
+
+    applyTemperatureDamage(deltaSeconds)
 end
 
 if autoDecayActive then
@@ -378,6 +618,14 @@ RegisterNetEvent('bcc-corehud:setNeeds', function(payload)
     end
 
     applyLocalNeedsUpdate(payload)
+end)
+
+RegisterNetEvent('bcc-corehud:layout:apply', function(payload)
+    if type(payload) == 'table' then
+        sendLayoutToNui(payload)
+    else
+        sendLayoutToNui(nil)
+    end
 end)
 
 RegisterNetEvent('bcc-corehud:setNeed', function(stat, value)
@@ -517,7 +765,10 @@ local function getVoiceTelemetry()
         inner = isTalking and 15 or 0,
         outer = toCoreMeter(percent),
         effectInside = effectInside,
-        effectNext = effectNext
+        effectNext = effectNext,
+        talking = isTalking and true or false,
+        proximity = proximity,
+        proximityPercent = percent
     }
 end
 
@@ -543,21 +794,8 @@ local function normalizeSnapshotForPersistence(snapshot)
         result[entry.key] = value
     end
 
-    local horseValuesPresent = false
-        local horseOptionalKeys = {
-        innerhorse_health = true,
-        outerhorse_health = true,
-        innerhorse_stamina = true,
-        outerhorse_stamina = true,
-        innerhorse_dirt = true,
-        outerhorse_dirt = true
-    }
-
     for _, entry in ipairs(OPTIONAL_PERSIST_NUMBERS) do
         local value = normalizeNumeric(snapshot[entry.key], entry.min, entry.max)
-        if value ~= nil and horseOptionalKeys[entry.key] then
-            horseValuesPresent = true
-        end
         result[entry.key] = value
     end
 
@@ -569,12 +807,6 @@ local function normalizeSnapshotForPersistence(snapshot)
             result[key] = nil
         end
     end
-
-    local horseActive = snapshot.horse_active == true or snapshot.horse_active == 1
-    if horseValuesPresent then
-        horseActive = true
-    end
-    result.horse_active = horseActive
 
     return result
 end
@@ -651,10 +883,6 @@ local function snapshotsDifferent(a, b)
         if valueOrSentinel(a[key]) ~= valueOrSentinel(b[key]) then
             return true
         end
-    end
-
-    if valueOrSentinel(a.horse_active and 1 or 0) ~= valueOrSentinel(b.horse_active and 1 or 0) then
-        return true
     end
 
     return false
@@ -846,14 +1074,18 @@ local function buildCoreSnapshot()
     local temperatureOuter = nil
     local temperatureInsideEffect = nil
     local temperatureNextEffect = nil
+    local temperatureValueInner = nil
+    local temperatureValueOuter = nil
+    local temperatureValueNextEffect = nil
 
     local temperaturePercent = mapTemperatureToPercent(worldTemperature)
-    if temperaturePercent and (showTemperatureAlways or temperatureEffect) then
-        temperatureInner = toCoreState(temperaturePercent)
-        temperatureOuter = toCoreMeter(temperaturePercent)
-        temperatureInsideEffect = temperatureEffect
-        temperatureNextEffect = string.format('%d°', round(worldTemperature))
-    elseif temperatureEffect then
+    if temperaturePercent then
+        temperatureValueInner = 15
+        temperatureValueOuter = 99
+        temperatureValueNextEffect = string.format('%d°', round(worldTemperature))
+    end
+
+    if temperatureEffect then
         temperatureInner = 15
         temperatureOuter = 99
         temperatureInsideEffect = temperatureEffect
@@ -917,11 +1149,16 @@ local function buildCoreSnapshot()
         outertemperature = temperatureOuter,
         effect_temperature_inside = temperatureInsideEffect,
         effect_temperature_next = temperatureNextEffect,
+        innertemperature_value = temperatureValueInner,
+        outertemperature_value = temperatureValueOuter,
+        effect_temperature_value_next = temperatureValueNextEffect,
         innervoice = voiceTelemetry and voiceTelemetry.inner or nil,
         outervoice = voiceTelemetry and voiceTelemetry.outer or nil,
         effect_voice_inside = voiceTelemetry and voiceTelemetry.effectInside or nil,
         effect_voice_next = voiceTelemetry and voiceTelemetry.effectNext or nil,
-        horse_active = horse ~= 0
+        voice_talking = voiceTelemetry and (voiceTelemetry.talking and true or false) or nil,
+        voice_proximity = voiceTelemetry and voiceTelemetry.proximity or nil,
+        voice_proximity_percent = voiceTelemetry and voiceTelemetry.proximityPercent or nil
     }
 end
 
@@ -941,15 +1178,39 @@ local function pushHudSnapshot()
     maybePersistSnapshot(snapshot)
 end
 
-local function setHudVisible(visible)
-    if hudVisible == visible then
-        debugPrint('HUD visibility unchanged', visible)
+local function computeHudSuppressed()
+    if IsPauseMenuActive() then
+        return true
+    end
+
+    local cinematicOpen = Citizen.InvokeNative(0x74F1D22EFA71FAB8)
+    if cinematicOpen == true or cinematicOpen == 1 or cinematicOpen == -1 then
+        return true
+    end
+
+    local mapOpen = Citizen.InvokeNative(0x25B7A0206BDFAC76, `MAP`)
+    if mapOpen == true or mapOpen == 1 or mapOpen == -1 then
+        return true
+    end
+
+    return false
+end
+
+local function applyHudVisibility()
+    local shouldShow = hudPreference and not hudSuppressed
+
+    if hudVisible == shouldShow then
+        debugPrint('HUD visibility unchanged', shouldShow)
         return
     end
 
-    hudVisible = visible
+    if not shouldShow and hudLayoutEditing then
+        setLayoutEditing(false, { skipSave = true })
+    end
 
-    debugPrint('HUD visibility set', hudVisible)
+    hudVisible = shouldShow
+
+    debugPrint('HUD visibility set', hudVisible, 'suppressed', hudSuppressed)
 
     SendNUIMessage({
         type = "toggle",
@@ -961,8 +1222,13 @@ local function setHudVisible(visible)
     end
 end
 
+local function setHudVisible(visible)
+    hudPreference = visible == true
+    applyHudVisibility()
+end
+
 function ToggleUI()
-    setHudVisible(not hudVisible)
+    setHudVisible(not hudPreference)
 end
 
 -- Immediately initialise the HUD when the resource starts
@@ -970,13 +1236,24 @@ CreateThread(function()
     if PaletteMenu and PaletteMenu.Rebuild then
         PaletteMenu:Rebuild()
     end
+
     Wait(500)
-    setHudVisible(autoShowHud)
+
+    hudPreference = autoShowHud
+    hudSuppressed = computeHudSuppressed()
+    applyHudVisibility()
+    requestLayoutFromServer()
 
     while true do
         Wait(updateInterval)
 
         processNeedsDecay(updateIntervalSeconds)
+
+        local suppressed = computeHudSuppressed()
+        if suppressed ~= hudSuppressed then
+            hudSuppressed = suppressed
+            applyHudVisibility()
+        end
 
         if hudVisible then
             pushHudSnapshot()
@@ -986,6 +1263,19 @@ end)
 
 RegisterCommand("togglehud", function()
     ToggleUI()
+end, false)
+
+RegisterCommand('hudlayout', function(_, args)
+    if type(args) == 'table' and args[1] then
+        local sub = tostring(args[1]):lower()
+        if sub == 'reset' then
+            setLayoutEditing(false, { skipSave = true })
+            TriggerServerEvent('bcc-corehud:layout:reset')
+            return
+        end
+    end
+
+    setLayoutEditing(not hudLayoutEditing)
 end, false)
 
 RegisterCommand('hudpalette', function()
@@ -1002,5 +1292,38 @@ RegisterNUICallback("updatestate", function(data, cb)
 
     if cb then
         cb("ok")
+    end
+end)
+
+RegisterNUICallback('setLayoutEditing', function(data, cb)
+    local targetState = data and data.editing
+    if type(targetState) == 'boolean' then
+        local options = nil
+        if data.skipSave == true then
+            options = { skipSave = true }
+        end
+
+        setLayoutEditing(targetState, options)
+    end
+
+    if cb then
+        cb('ok')
+    end
+end)
+
+RegisterNUICallback('saveLayout', function(data, cb)
+    local positions = data and data.positions
+    if type(positions) ~= 'table' then
+        if cb then
+            cb('invalid')
+        end
+        return
+    end
+
+    TriggerServerEvent('bcc-corehud:layout:save', positions)
+    sendLayoutToNui(positions)
+
+    if cb then
+        cb('ok')
     end
 end)

@@ -1,101 +1,37 @@
-local saveEnabled = Config.SaveToDatabase ~= false
-local autoCreate = Config.AutoCreateTable ~= false
-local tableName = Config.DatabaseTable or 'bcc_corehud'
-local paletteTableName = Config.PaletteTable or 'bcc_corehud_palette'
-local autoCreatePalette = Config.AutoCreatePaletteTable ~= false
+-- bcc-corehud: database bootstrap (always create table if missing)
 
-if saveEnabled and autoCreate then
-    CreateThread(function()
-        if type(MySQL) ~= 'table' or not MySQL.query or not MySQL.query.await then
-            print('^1[BCC-CoreHUD]^0 MySQL library missing; database table will not be created automatically.')
-            return
-        end
+CreateThread(function()
+    if type(MySQL) ~= 'table' or not MySQL.query or not MySQL.query.await then
+        print('^1[BCC-CoreHUD]^0 MySQL library missing; database table will not be created automatically.')
+        return
+    end
 
-        if type(tableName) ~= 'string' or tableName == '' or tableName:find('[^%w_]') then
-            print('^1[BCC-CoreHUD]^0 Invalid Config.DatabaseTable value. Skipping auto creation.')
-            return
-        end
+    -- Create the bcc_corehud table if it doesn't exist
+    local tableName = Config.DatabaseTable or 'bcc_corehud'
 
-        local columns = [[
+    MySQL.query.await(([[
+        CREATE TABLE IF NOT EXISTS `%s` (
             `character_id` VARCHAR(64) NOT NULL,
             `innerhealth` TINYINT UNSIGNED NOT NULL DEFAULT 0,
             `outerhealth` TINYINT UNSIGNED NOT NULL DEFAULT 0,
             `innerstamina` TINYINT UNSIGNED NOT NULL DEFAULT 0,
             `outerstamina` TINYINT UNSIGNED NOT NULL DEFAULT 0,
+            `outerhunger` TINYINT UNSIGNED DEFAULT NULL,
+            `outerthirst` TINYINT UNSIGNED DEFAULT NULL,
+            `outerstress` TINYINT UNSIGNED DEFAULT NULL,
             `innerhorse_health` TINYINT UNSIGNED DEFAULT NULL,
             `outerhorse_health` TINYINT UNSIGNED DEFAULT NULL,
             `innerhorse_stamina` TINYINT UNSIGNED DEFAULT NULL,
             `outerhorse_stamina` TINYINT UNSIGNED DEFAULT NULL,
-            `innerhorse_dirt` TINYINT UNSIGNED DEFAULT NULL,
-            `outerhorse_dirt` TINYINT UNSIGNED DEFAULT NULL,
-            `innertemperature` TINYINT UNSIGNED DEFAULT NULL,
-            `outertemperature` TINYINT UNSIGNED DEFAULT NULL,
-            `effect_health_inside` VARCHAR(32) DEFAULT NULL,
-            `effect_stamina_inside` VARCHAR(32) DEFAULT NULL,
-            `effect_horse_health_inside` VARCHAR(32) DEFAULT NULL,
-            `effect_horse_stamina_inside` VARCHAR(32) DEFAULT NULL,
-            `effect_horse_dirt_inside` VARCHAR(32) DEFAULT NULL,
-            `effect_horse_dirt_next` VARCHAR(32) DEFAULT NULL,
-            `effect_temperature_inside` VARCHAR(32) DEFAULT NULL,
-            `effect_temperature_next` VARCHAR(32) DEFAULT NULL,
-            `horse_active` TINYINT(1) NOT NULL DEFAULT 0,
+            `palette_json` LONGTEXT NULL,
+            `layout_json` LONGTEXT NULL,
             `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
             PRIMARY KEY (`character_id`)
-        ]]
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+    ]]):format(tableName))
 
-        local query = string.format([[CREATE TABLE IF NOT EXISTS `%s` (
-            %s
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;]], tableName, columns)
-
-        local ok, err = pcall(function()
-            MySQL.query.await(query)
-        end)
-
-
-        if ok then
-            local alters = {
-                string.format('ALTER TABLE `%s` ADD COLUMN IF NOT EXISTS `innerhorse_dirt` TINYINT UNSIGNED DEFAULT NULL', tableName),
-                string.format('ALTER TABLE `%s` ADD COLUMN IF NOT EXISTS `outerhorse_dirt` TINYINT UNSIGNED DEFAULT NULL', tableName),
-                string.format('ALTER TABLE `%s` ADD COLUMN IF NOT EXISTS `innertemperature` TINYINT UNSIGNED DEFAULT NULL', tableName),
-                string.format('ALTER TABLE `%s` ADD COLUMN IF NOT EXISTS `outertemperature` TINYINT UNSIGNED DEFAULT NULL', tableName),
-                string.format('ALTER TABLE `%s` ADD COLUMN IF NOT EXISTS `effect_horse_dirt_inside` VARCHAR(32) DEFAULT NULL', tableName),
-                string.format('ALTER TABLE `%s` ADD COLUMN IF NOT EXISTS `effect_horse_dirt_next` VARCHAR(32) DEFAULT NULL', tableName),
-                string.format('ALTER TABLE `%s` ADD COLUMN IF NOT EXISTS `effect_temperature_inside` VARCHAR(32) DEFAULT NULL', tableName),
-                string.format('ALTER TABLE `%s` ADD COLUMN IF NOT EXISTS `effect_temperature_next` VARCHAR(32) DEFAULT NULL', tableName)
-            }
-
-            for _, stmt in ipairs(alters) do
-                MySQL.query.await(stmt)
-            end
-
-            print('^2[BCC-CoreHUD]^0 Database table `' .. tableName .. '` verified.')
-
-            if autoCreatePalette then
-                if type(paletteTableName) ~= 'string' or paletteTableName == '' or paletteTableName:find('[^%w_]') then
-                    print('^1[BCC-CoreHUD]^0 Invalid Config.PaletteTable value. Skipping palette table creation.')
-                else
-                    local paletteQuery = string.format([[CREATE TABLE IF NOT EXISTS `%s` (
-                        `character_id` VARCHAR(64) NOT NULL,
-                        `palette_json` LONGTEXT NULL,
-                        `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                        PRIMARY KEY (`character_id`)
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;]], paletteTableName)
-
-                    local okPalette, errPalette = pcall(function()
-                        MySQL.query.await(paletteQuery)
-                    end)
-
-                    if okPalette then
-                        print('^2[BCC-CoreHUD]^0 Palette table `' .. paletteTableName .. '` verified.')
-                    else
-                        print('^1[BCC-CoreHUD]^0 Failed to create palette table `' .. paletteTableName .. '`:', errPalette)
-                    end
-                end
-            end
-        else
-            print('^1[BCC-CoreHUD]^0 Failed to create table `' .. tableName .. '`:', err)
-        end
-    end)
-elseif saveEnabled then
-    print('^3[BCC-CoreHUD]^0 Config.AutoCreateTable disabled; skipping automatic database setup.')
-end
+    print(string.format(
+        "Database table for \27[35m\27[1m*bcc-corehud*\27[0m (%s) created or verified \27[32msuccessfully\27[0m.",
+        tableName
+    ))
+end)

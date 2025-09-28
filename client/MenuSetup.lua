@@ -104,6 +104,17 @@ function PM:Reset()
     self:QueueSave()
 end
 
+local function executeClientCommand(command)
+    if type(command) ~= 'string' or command == '' then
+        return
+    end
+
+    local runner = ExecuteCommand
+    if type(runner) == 'function' then
+        runner(command)
+    end
+end
+
 function PM:ApplyPreset(preset)
     self:ApplySnapshot(preset or COLORFUL_PRESET)
     self:QueueSave()
@@ -388,6 +399,49 @@ function PM:EnsureMenu()
 
         self.sliderRefs[statKey] = entryRefs
     end
+
+    self.pageHandle:RegisterElement('line', {
+        slot = 'content'
+    })
+
+    self.pageHandle:RegisterElement('subheader', {
+        value = 'HUD Controls',
+        slot = 'content',
+        style = {
+            ['margin-top'] = '8px'
+        }
+    })
+
+    self.pageHandle:RegisterElement('button', {
+        label = 'Toggle Layout Editor (/hudlayout)',
+        slot = 'content'
+    }, function()
+        if self.menuHandle then
+            self.menuHandle:Close()
+        end
+        executeClientCommand('hudlayout')
+    end)
+
+    self.pageHandle:RegisterElement('button', {
+        label = 'Toggle HUD Visibility (/togglehud)',
+        slot = 'content'
+    }, function()
+        if type(ToggleUI) == 'function' then
+            ToggleUI()
+        else
+            executeClientCommand('togglehud')
+        end
+    end)
+
+    self.pageHandle:RegisterElement('button', {
+        label = 'Reopen Palette Menu (/hudpalette)',
+        slot = 'content'
+    }, function()
+        if self.menuHandle then
+            self.menuHandle:Close()
+        end
+        executeClientCommand('hudpalette')
+    end)
 
     self.pageHandle:RegisterElement('button', {
         label = 'Apply Colorful Preset',

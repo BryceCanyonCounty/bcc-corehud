@@ -1,6 +1,7 @@
 <script setup>
-import { ref, onMounted, onBeforeUnmount, provide, readonly } from 'vue'
-import CoresDisplay from '@/components/CoresDisplay.vue'
+import { ref, onMounted, onBeforeUnmount, provide, readonly, computed, watch, nextTick } from 'vue'
+import CoreSlot from '@/components/CoreSlot.vue'
+import api from '@/api'
 
 const DEFAULT_SLOT = Object.freeze({
   inner: 15,
@@ -19,14 +20,19 @@ const createDefaultCores = () => ({
   horse_health: null,
   horse_stamina: null,
   horse_dirt: null,
-  temperature: null
+  temperature: null,
+  temperature_value: null
 })
 
 const cores = ref(createDefaultCores())
 const visible = ref(false)
 const devmode = ref(false)
+const layoutEditing = ref(false)
+const layoutDirty = ref(false)
+const dragState = ref(null)
 
 provide('cores', readonly(cores))
+provide('layoutEditing', readonly(layoutEditing))
 
 const DEFAULT_PALETTE_ENTRY = Object.freeze({
   accent: '#ffffff',
@@ -45,6 +51,7 @@ const createDefaultPalette = () => ({
   thirst: { ...DEFAULT_PALETTE_ENTRY },
   stress: { ...DEFAULT_PALETTE_ENTRY },
   temperature: { ...DEFAULT_PALETTE_ENTRY },
+  temperature_value: { ...DEFAULT_PALETTE_ENTRY },
   horse_health: { ...DEFAULT_PALETTE_ENTRY },
   horse_stamina: { ...DEFAULT_PALETTE_ENTRY },
   horse_dirt: { ...DEFAULT_PALETTE_ENTRY },
@@ -54,6 +61,83 @@ const createDefaultPalette = () => ({
 const palette = ref(createDefaultPalette())
 
 provide('palette', readonly(palette))
+
+const SLOT_ORDER = Object.freeze([
+  'health',
+  'stamina',
+  'hunger',
+  'thirst',
+  'stress',
+  'voice',
+  'horse_health',
+  'horse_stamina',
+  'horse_dirt',
+  'temperature',
+  'temperature_value'
+])
+
+const SLOT_LABELS = Object.freeze({
+  health: 'Health',
+  stamina: 'Stamina',
+  hunger: 'Hunger',
+  thirst: 'Thirst',
+  stress: 'Stress',
+  voice: 'Voice',
+  horse_health: 'Horse Health',
+  horse_stamina: 'Horse Stamina',
+  horse_dirt: 'Horse Cleanliness',
+  temperature: 'Temperature',
+  temperature_value: 'Temperature (°)'
+})
+
+const roundToThree = (value) => Math.round(value * 1000) / 1000
+const clampPercentValue = (value) => {
+  if (!Number.isFinite(value)) {
+    return 0
+  }
+  if (value < 0) {
+    return 0
+  }
+  if (value > 100) {
+    return 100
+  }
+  return value
+}
+
+const createFallbackLayout = () => {
+  const spacing = 7.0
+  const baseX = 12
+  const baseY = 50
+  const start = baseY - ((SLOT_ORDER.length - 1) * spacing) / 2
+  const result = {}
+  SLOT_ORDER.forEach((slot, index) => {
+    const percentY = clampPercentValue(start + index * spacing)
+    result[slot] = {
+      x: roundToThree(clampPercentValue(baseX)),
+      y: roundToThree(percentY)
+    }
+  })
+  return result
+}
+
+const fallbackLayout = Object.freeze(createFallbackLayout())
+
+const layoutPositions = ref({})
+const defaultLayout = ref({})
+const layoutExitPending = ref(false)
+
+const layoutHasEntries = computed(() => Object.keys(layoutPositions.value).length > 0)
+const useAbsoluteLayout = computed(() => layoutEditing.value || layoutHasEntries.value)
+const draggingType = computed(() => dragState.value?.type ?? null)
+
+const slotRefs = new Map()
+const setSlotRef = (type, el) => {
+  if (el) {
+    slotRefs.set(type, el)
+  } else {
+    slotRefs.delete(type)
+  }
+}
 
 const clamp = (value, min, max, fallback) => {
   if (typeof value !== 'number' || Number.isNaN(value)) {
@@ -87,12 +171,27 @@ const normalizeCore = (payload, mapping) => {
     return null
   }
 
-  return {
+  const result = {
     inner: clamp(inner, 0, 15, DEFAULT_SLOT.inner),
     outer: clamp(outer, 0, 99, DEFAULT_SLOT.outer),
     effectInside: typeof effectInside === 'string' ? effectInside : null,
     effectNext: typeof effectNext === 'string' ? effectNext : null
   }
+
+  if (mapping.meta && typeof mapping.meta === 'object') {
+    for (const [targetKey, sourceKey] of Object.entries(mapping.meta)) {
+      if (typeof targetKey !== 'string' || typeof sourceKey !== 'string') {
+        continue
+      }
+
+      const value = payload?.[sourceKey]
+      if (value !== undefined) {
+        result[targetKey] = value
+      }
+    }
+  }
+
+  return result
 }
 
 const CORE_MAP = {
@@ -130,7 +229,12 @@ const CORE_MAP = {
     inner: 'innervoice',
     outer: 'outervoice',
     effectInside: 'effect_voice_inside',
-    effectNext: 'effect_voice_next'
+    effectNext: 'effect_voice_next',
+    meta: {
+      talking: 'voice_talking',
+      proximity: 'voice_proximity',
+      proximityPercent: 'voice_proximity_percent'
+    }
   },
   horse_health: {
     inner: 'innerhorse_health',
@@ -156,6 +260,12 @@ const CORE_MAP = {
     outer: 'outertemperature',
     effectInside: 'effect_temperature_inside',
     effectNext: 'effect_temperature_next'
+  },
+  temperature_value: {
+    inner: 'innertemperature_value',
+    outer: 'outertemperature_value',
+    effectInside: null,
+    effectNext: 'effect_temperature_value_next'
   }
 }
 
@@ -170,7 +280,283 @@ const setCores = (corePayload) => {
   cores.value = next
 }
 
-const handleMessage = (event) => {
+const sanitizeLayoutPayload = (payload) => {
+  if (!payload || typeof payload !== 'object') {
+    return {}
+  }
+
+  const sanitized = {}
+  for (const [key, value] of Object.entries(payload)) {
+    if (!value || typeof value !== 'object') {
+      continue
+    }
+
+    const x = Number(value.x)
+    const y = Number(value.y)
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      continue
+    }
+
+    sanitized[key] = {
+      x: roundToThree(clampPercentValue(x)),
+      y: roundToThree(clampPercentValue(y))
+    }
+  }
+
+  return sanitized
+}
+
+const buildLayoutPayload = () => {
+  const payload = {}
+  for (const [key, value] of Object.entries(layoutPositions.value)) {
+    if (!value || typeof value !== 'object') {
+      continue
+    }
+
+    const x = Number(value.x)
+    const y = Number(value.y)
+    if (!Number.isFinite(x) || !Number.isFinite(y)) {
+      continue
+    }
+
+    payload[key] = {
+      x: roundToThree(clampPercentValue(x)),
+      y: roundToThree(clampPercentValue(y))
+    }
+  }
+  return payload
+}
+
+const getSlotPosition = (type) => {
+  const layoutEntry = layoutPositions.value[type]
+  if (layoutEntry) {
+    return layoutEntry
+  }
+
+  const defaultEntry = defaultLayout.value[type]
+  if (defaultEntry) {
+    return defaultEntry
+  }
+
+  const fallbackEntry = fallbackLayout[type]
+  if (fallbackEntry) {
+    return fallbackEntry
+  }
+
+  return { x: 50, y: 80 }
+}
+
+const getSlotStyle = (type) => {
+  const position = getSlotPosition(type)
+  return {
+    left: `${position.x}vw`,
+    top: `${position.y}vh`
+  }
+}
+
+const updateLayoutPosition = (type, xPercent, yPercent) => {
+  const safeX = roundToThree(clampPercentValue(xPercent))
+  const safeY = roundToThree(clampPercentValue(yPercent))
+  const current = layoutPositions.value[type]
+
+  if (current && current.x === safeX && current.y === safeY) {
+    return
+  }
+
+  layoutPositions.value = {
+    ...layoutPositions.value,
+    [type]: { x: safeX, y: safeY }
+  }
+  layoutDirty.value = true
+}
+
+const captureDefaultLayout = async () => {
+  if (useAbsoluteLayout.value) {
+    return
+  }
+
+  await nextTick()
+  await new Promise((resolve) => window.requestAnimationFrame(resolve))
+
+  const viewportWidth = window.innerWidth || 1
+  const viewportHeight = window.innerHeight || 1
+  const captured = {}
+
+  slotRefs.forEach((element, type) => {
+    if (!element) {
+      return
+    }
+
+    const rect = element.getBoundingClientRect()
+    if (!rect.width && !rect.height) {
+      return
+    }
+
+    const centerX = rect.left + rect.width / 2
+    const centerY = rect.top + rect.height / 2
+    const percentX = roundToThree(clampPercentValue((centerX / viewportWidth) * 100))
+    const percentY = roundToThree(clampPercentValue((centerY / viewportHeight) * 100))
+    captured[type] = { x: percentX, y: percentY }
+  })
+
+  if (Object.keys(captured).length > 0) {
+    defaultLayout.value = captured
+  }
+}
+
+const ensureLayoutPositionsFromInline = async () => {
+  if (layoutHasEntries.value) {
+    return
+  }
+
+  await captureDefaultLayout()
+
+  if (layoutHasEntries.value) {
+    return
+  }
+
+  if (Object.keys(defaultLayout.value).length > 0) {
+    layoutPositions.value = { ...defaultLayout.value }
+  } else {
+    layoutPositions.value = { ...fallbackLayout }
+  }
+}
+
+const handlePointerMove = (event) => {
+  const state = dragState.value
+  if (!state) {
+    return
+  }
+
+  if (state.pointerId !== undefined && event.pointerId !== state.pointerId) {
+    return
+  }
+
+  event.preventDefault()
+
+  const viewportWidth = window.innerWidth || 1
+  const viewportHeight = window.innerHeight || 1
+
+  const centerX = event.clientX - state.offsetX
+  const centerY = event.clientY - state.offsetY
+
+  const percentX = (centerX / viewportWidth) * 100
+  const percentY = (centerY / viewportHeight) * 100
+
+  updateLayoutPosition(state.type, percentX, percentY)
+}
+
+const stopDrag = () => {
+  if (!dragState.value) {
+    return
+  }
+
+  dragState.value = null
+  window.removeEventListener('pointermove', handlePointerMove)
+  window.removeEventListener('pointerup', stopDrag)
+  window.removeEventListener('pointercancel', stopDrag)
+}
+
+const startDrag = (type, event) => {
+  if (!layoutEditing.value) {
+    return
+  }
+
+  event.preventDefault()
+  event.stopPropagation()
+
+  const viewportWidth = window.innerWidth || 1
+  const viewportHeight = window.innerHeight || 1
+  const basis = getSlotPosition(type)
+
+  const basisX = (basis.x / 100) * viewportWidth
+  const basisY = (basis.y / 100) * viewportHeight
+
+  dragState.value = {
+    type,
+    pointerId: event.pointerId,
+    offsetX: event.clientX - basisX,
+    offsetY: event.clientY - basisY
+  }
+
+  window.addEventListener('pointermove', handlePointerMove)
+  window.addEventListener('pointerup', stopDrag)
+  window.addEventListener('pointercancel', stopDrag)
+}
+
+const saveLayoutToServer = async () => {
+  const payload = buildLayoutPayload()
+
+  if (typeof GetParentResourceName === 'undefined') {
+    console.info('[BCC-CoreHUD] Layout payload (dev)', payload)
+    layoutDirty.value = false
+    return
+  }
+
+  try {
+    await api.post('saveLayout', { positions: payload })
+    layoutDirty.value = false
+  } catch (error) {
+    console.error('[BCC-CoreHUD] Failed to save layout', error)
+  }
+}
+
+const toggleLayoutEditing = async (enabled) => {
+  if (enabled) {
+    await ensureLayoutPositionsFromInline()
+  } else {
+    stopDrag()
+    layoutExitPending.value = false
+  }
+
+  layoutEditing.value = enabled
+}
+
+const requestLayoutExit = async () => {
+  if (layoutExitPending.value) {
+    return
+  }
+
+  layoutExitPending.value = true
+
+  if (typeof GetParentResourceName === 'undefined') {
+    await toggleLayoutEditing(false)
+    layoutExitPending.value = false
+    return
+  }
+
+  try {
+    await api.post('setLayoutEditing', {
+      editing: false,
+      skipSave: true,
+      reason: 'escape'
+    })
+  } catch (error) {
+    console.error('[BCC-CoreHUD] Failed to request layout exit', error)
+  } finally {
+    layoutExitPending.value = false
+  }
+}
+
+const handleKeydown = (event) => {
+  if (!layoutEditing.value) {
+    return
+  }
+
+  if (event.key === 'Escape' || event.key === 'Esc') {
+    event.preventDefault()
+    event.stopPropagation()
+    requestLayoutExit()
+  }
+}
+
+const handleResize = () => {
+  if (!layoutEditing.value && !layoutHasEntries.value) {
+    captureDefaultLayout()
+  }
+}
+
+const handleMessage = async (event) => {
   const { data } = event
   if (!data || typeof data.type !== 'string') {
     return
@@ -187,6 +573,23 @@ const handleMessage = (event) => {
       if (typeof data.visible === 'boolean') {
         visible.value = data.visible
       }
+      break
+
+    case 'layout':
+      layoutPositions.value = sanitizeLayoutPayload(data.positions)
+      if (!layoutEditing.value) {
+        layoutDirty.value = false
+      }
+      break
+
+    case 'layoutEdit':
+      if (typeof data.editing === 'boolean') {
+        await toggleLayoutEditing(data.editing)
+      }
+      break
+
+    case 'layoutRequestSave':
+      saveLayoutToServer()
       break
 
     case 'palette':
@@ -219,29 +622,147 @@ const handleMessage = (event) => {
 
 onMounted(() => {
   window.addEventListener('message', handleMessage)
+  window.addEventListener('blur', stopDrag)
+  window.addEventListener('resize', handleResize)
+  window.addEventListener('keydown', handleKeydown)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('message', handleMessage)
+  window.removeEventListener('blur', stopDrag)
+  window.removeEventListener('resize', handleResize)
+  window.removeEventListener('keydown', handleKeydown)
+  stopDrag()
+})
+
+watch(
+  [visible, devmode, useAbsoluteLayout],
+  async ([isVisible, isDev, absolute]) => {
+    if ((isVisible || isDev) && !absolute) {
+      await captureDefaultLayout()
+    }
+  },
+  { immediate: true }
+)
+
+watch(useAbsoluteLayout, (active) => {
+  if (!active) {
+    stopDrag()
+  }
 })
 </script>
 
 <template>
-  <div class="core-layout" v-if="visible || devmode">
-    <CoresDisplay />
+  <div
+    v-if="visible || devmode"
+    class="core-layout"
+    :class="{ 'core-layout--editing': layoutEditing }"
+  >
+    <div
+      v-if="useAbsoluteLayout"
+      class="core-layout-overlay"
+      :class="{ 'core-layout-overlay--editing': layoutEditing }"
+    >
+      <div v-if="layoutEditing" class="core-layout-grid"></div>
+      <div
+        v-for="type in SLOT_ORDER"
+        :key="type"
+        class="core-slot-wrapper"
+        :class="{
+          'core-slot-wrapper--editing': layoutEditing,
+          'core-slot-wrapper--dragging': draggingType === type
+        }"
+        :style="getSlotStyle(type)"
+        @pointerdown="(event) => startDrag(type, event)"
+      >
+        <CoreSlot :type="type" />
+      </div>
+    </div>
+    <div v-else class="core-layout-row">
+      <div
+        v-for="type in SLOT_ORDER"
+        :key="type"
+        class="core-slot-inline"
+        :ref="(el) => setSlotRef(type, el)"
+      >
+        <CoreSlot :type="type" />
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
+
 .core-layout {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  justify-content: flex-start;
+  align-items: flex-start;
+  pointer-events: none;
+  z-index: 10;
+}
+
+.core-layout--editing {
+  pointer-events: auto;
+}
+
+.core-layout-row {
   position: absolute;
   bottom: 4vh;
-  left: 50%;
-  transform: translateX(-50%);
   display: flex;
-  justify-content: center;
-  z-index: 10;
+  flex-direction: column;
+  gap: 0.65rem;
   pointer-events: none;
-  width: max-content;
+  align-items: flex-start;
 }
+
+.core-slot-inline {
+  pointer-events: none;
+}
+
+.core-layout-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.core-layout-overlay--editing {
+  pointer-events: auto;
+}
+
+.core-layout-grid {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.12) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.12) 1px, transparent 1px),
+    linear-gradient(to right, rgba(255, 255, 255, 0.2) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.2) 1px, transparent 1px);
+  background-size:
+    2.5vw 100%,
+    100% 4vh,
+    12.5vw 100%,
+    100% 16vh;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-sizing: border-box;
+}
+
+.core-slot-wrapper {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  transition: transform 0.18s ease;
+}
+
+.core-slot-wrapper--editing {
+  pointer-events: auto;
+  cursor: grab;
+}
+
+.core-slot-wrapper--dragging {
+  cursor: grabbing;
+}
+
 </style>
