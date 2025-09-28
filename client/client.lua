@@ -206,10 +206,7 @@ if hotThirstMultiplier < 1.0 then
     hotThirstMultiplier = 1.0
 end
 local hotThirstBypassDelay = config.HotThirstBypassDelay ~= false
-local crossNeedDecayMultiplier = tonumber(config.CrossNeedDecayMultiplier) or 1.5
-if crossNeedDecayMultiplier < 1.0 then
-    crossNeedDecayMultiplier = 1.0
-end
+-- (cross-decay removed)
 local starvationDamageDelay = math.max(0.0, tonumber(config.StarvationDamageDelay) or 0.0)
 local starvationDamageInterval = math.max(0.0, tonumber(config.StarvationDamageInterval) or 10.0)
 local starvationDamageAmount = math.max(0.0, tonumber(config.StarvationDamageAmount) or 4.0)
@@ -591,11 +588,7 @@ local function processNeedsDecay(deltaSeconds)
                         decayMultiplier = hotThirstMultiplier
                     end
 
-                    if stat == 'hunger' and isThirstEmpty then
-                        decayMultiplier = decayMultiplier * crossNeedDecayMultiplier
-                    elseif stat == 'thirst' and isHungerEmpty then
-                        decayMultiplier = decayMultiplier * crossNeedDecayMultiplier
-                    end
+                    -- (cross-need multiplier removed)
 
                     if stat == 'hunger' then
                         decayMultiplier = decayMultiplier * hungerActivityMultiplier
