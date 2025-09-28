@@ -25,12 +25,12 @@ server_script {
 }
 
 ui_page {
-    "ui/index.html"
+    "ui/dist/index.html"
 }
 
 files {
-    "ui/index.html",
-    "ui/**/*"
+    "ui/dist/index.html",
+    "ui/dist/**/*"
 }
 
-version '1.2.1'
+version '1.2.2'

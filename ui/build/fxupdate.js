@@ -10,8 +10,8 @@ fs.readFile('../fxmanifest.lua', 'utf8', function (err, data) {
     let expr = /files \{([^}]*)\}/g
     let replace = 
 `files {
-    "ui/dist/index.html",
-    "ui/dist/**/*"
+    "ui/index.html",
+    "ui/**/*"
 }`
 
     let to_file = 'ui/shim.html';
