@@ -11,7 +11,6 @@ if horseDirtyThreshold == nil then
     horseDirtyThreshold = 4
 end
 
-
 local coldTempThreshold = config.TemperatureColdThreshold
 if coldTempThreshold == false then
     coldTempThreshold = nil
@@ -20,7 +19,6 @@ else
 end
 
 local hotTempThreshold = config.TemperatureHotThreshold
-
 if hotTempThreshold == false then
     hotTempThreshold = nil
 else
@@ -42,12 +40,72 @@ local hungerWarningEffect = config.HungerWarningEffect or 'starving'
 local thirstWarningEffect = config.ThirstWarningEffect or 'parched'
 local stressWarningEffect = config.StressWarningEffect or 'stressed'
 
+-- ===========================
+-- Voice core + proximity steps
+-- ===========================
 local voiceCoreEnabled = config.EnableVoiceCore ~= false
-local voiceMaxRange = type(config.VoiceMaxRange) == 'number' and config.VoiceMaxRange or 12.0
+local voiceMaxRange = type(config.VoiceMaxRange) == 'number' and config.VoiceMaxRange
 if voiceMaxRange <= 0 then
-    voiceMaxRange = 12.0
+    voiceMaxRange = 50.0
 end
 local voiceTalkingLabel = config.VoiceTalkingLabel or 'talking'
+
+-- Steps to cycle (whisper/normal/shout). You can override in Config.VoiceProximitySteps = { 2.0, 5.0, 12.0 }
+local voiceProximitySteps = {}
+do
+    local steps = config.VoiceProximitySteps
+    local tmp = {}
+    for _, v in ipairs(steps) do
+        local n = tonumber(v)
+        if n and n > 0 then tmp[#tmp+1] = n end
+    end
+    table.sort(tmp)
+    for i = 1, #tmp do
+        if i == 1 or tmp[i] ~= tmp[i-1] then
+            voiceProximitySteps[#voiceProximitySteps+1] = tmp[i]
+        end
+    end
+    if #voiceProximitySteps == 0 then voiceProximitySteps = { 2.0, 15.0, 50.0 } end
+end
+
+local voiceStepIndex = math.floor((tonumber(config.VoiceDefaultStepIndex) or 2) + 0.5)
+if voiceStepIndex < 1 then voiceStepIndex = 1 end
+if voiceStepIndex > #voiceProximitySteps then voiceStepIndex = #voiceProximitySteps end
+
+-- Largest step used for HUD normalization
+local voiceMaxStep = voiceProximitySteps[#voiceProximitySteps]
+
+local function resolveControlHash(val)
+    if type(val) == 'number' then return val end
+    if type(val) == 'string' and val ~= '' then return GetHashKey(val) end
+    return 0x26E9DC00 -- fallback control hash; override via Config.VoiceCycleControl
+end
+local voiceCycleControl = resolveControlHash(config.VoiceCycleControl)
+
+local function setTalkerProximity(metres)
+    pcall(MumbleSetTalkerProximity, metres)
+    -- keep input/output distances similar (harmless if not supported on your build)
+    pcall(MumbleSetAudioInputDistance, metres)
+    pcall(MumbleSetAudioOutputDistance, metres)
+    if debugEnabled then
+        print(('[BCC-CoreHUD] Voice proximity set: %.1fm'):format(metres))
+    end
+end
+
+local function applyVoiceStep(idx)
+    if idx < 1 then idx = #voiceProximitySteps end
+    if idx > #voiceProximitySteps then idx = 1 end
+    voiceStepIndex = idx
+    local metres = voiceProximitySteps[voiceStepIndex]
+    setTalkerProximity(metres)
+    -- optional toast (replace with your notify if desired)
+    pcall(TriggerEvent, 'chat:addMessage', { args = { '^3Voice', ('Proximity: %.0fm'):format(metres) } })
+end
+
+local function cycleVoiceStep(dir)
+    applyVoiceStep(voiceStepIndex + (dir or 1))
+end
+-- ===========================
 
 if PaletteMenu and PaletteMenu.Init then
     PaletteMenu:Init({ debugEnabled = debugEnabled })
@@ -67,6 +125,7 @@ local NATIVE_GET_PED_MAX_STAMINA = 0xCB42AFE2B613EE55
 local NATIVE_GET_ATTRIBUTE_RANK = 0xA4C8E23E29040DE0
 
 local HORSE_DIRTINESS_ATTRIBUTE_INDEX = 16
+local NATIVE_HUD_SET_ICON_VISIBILITY = 0xC116E6DF68DCE667
 
 local REQUIRED_PERSIST_NUMBERS = {
     { key = 'innerhealth', min = 0, max = 15, default = 0 },
@@ -159,11 +218,9 @@ local function asPercent(value)
     if value == nil then
         return 0.0
     end
-
     if value <= 1.0 then
         return value * 100.0
     end
-
     return clamp(value, 0.0, 100.0)
 end
 
@@ -171,7 +228,6 @@ local function toPercentOrNil(value)
     if value == nil then
         return nil
     end
-
     return asPercent(value)
 end
 
@@ -385,6 +441,35 @@ local function setLocalNeedValue(stat, value, options)
     end
 end
 
+local entityHealthChangeNative = 0x835F131E7DC8F97A
+
+local function hideRdrHudIcons()
+    local iconsToHide = {
+        0, 1, -- stamina / stamina core
+        2, 3, -- deadeye / deadeye core
+        4, 5, -- health / health core
+        6, 7, -- horse health / core
+        8, 9, -- horse stamina / core
+        10, 11 -- horse courage / core
+    }
+
+    for _, icon in ipairs(iconsToHide) do
+        Citizen.InvokeNative(NATIVE_HUD_SET_ICON_VISIBILITY, icon, 2)
+    end
+end
+
+local function changeEntityHealth(entity, delta)
+    if entity == 0 or entity == nil then
+        return false
+    end
+
+    if delta == nil or delta == 0 then
+        return false
+    end
+
+    return Citizen.InvokeNative(entityHealthChangeNative, entity, delta, 0, 0)
+end
+
 local function applyStarvationDamage()
     if starvationDamageAmount <= 0.0 then
         return
@@ -405,12 +490,7 @@ local function applyStarvationDamage()
         return
     end
 
-    local newHealth = currentHealth - damage
-    if newHealth < 0 then
-        newHealth = 0
-    end
-
-    SetEntityHealth(ped, newHealth)
+    changeEntityHealth(ped, -damage)
 end
 
 local function applyTemperatureDamage(deltaSeconds)
@@ -452,7 +532,7 @@ local function applyTemperatureDamage(deltaSeconds)
         return
     end
 
-    SetEntityHealth(ped, math.max(0, currentHealth - damage))
+    changeEntityHealth(ped, -damage)
 end
 
 local function sendLayoutToNui(payload)
@@ -737,7 +817,8 @@ local function getVoiceTelemetry()
         proximity = 0.0
     end
 
-    local effectiveMaxRange = voiceMaxRange
+    -- Normalize by the largest configured step so the ring shows 100% on "shout"
+    local effectiveMaxRange = math.max(voiceMaxRange or 12.0, voiceMaxStep or 12.0)
     if effectiveMaxRange <= 0.0 then
         effectiveMaxRange = 12.0
     end
@@ -837,18 +918,15 @@ local function isHorseDirty(horse)
 
     local dirtRank = getHorseDirtRank(horse)
 
-    -- Rank 0 can mean either "unknown" or "perfectly clean" depending on the
-    -- native response. Treat it as clean unless the fallback reports dirt.
     if dirtRank > 0 then
         return dirtRank <= horseDirtyThreshold
     end
 
-    -- Fallback to the direct dirt level measurement (0.0 clean -> 1.0 filthy).
     local success, dirtLevel = pcall(Citizen.InvokeNative, 0x2B3451FA1E3142E2, horse)
     if success then
         dirtLevel = tonumber(dirtLevel) or 0.0
         if dirtLevel > 0.0 then
-            return dirtLevel >= 0.35 -- configurable threshold via rank when available
+            return dirtLevel >= 0.35
         end
     end
 
@@ -1018,7 +1096,6 @@ local function buildCoreSnapshot()
         horseStaminaPercent = getPedStaminaPercent(horse)
     end
 
-    -- Effects when the inner core gets critically low
     local healthEffect = computeEffect(healthCore, lowCoreThreshold, "wounded")
     local staminaEffect = computeEffect(staminaCore, lowCoreThreshold, "drained")
     local horseHealthEffect = computeEffect(horseHealthCore or 100.0, lowCoreThreshold, "wounded")
@@ -1067,7 +1144,6 @@ local function buildCoreSnapshot()
 
     local worldTemperature = getWorldTemperature()
     local temperatureEffect = computeTemperatureEffect(worldTemperature)
-
     currentTemperatureEffect = temperatureEffect
 
     local temperatureInner = nil
@@ -1140,7 +1216,7 @@ local function buildCoreSnapshot()
         effect_stamina_inside = staminaEffect,
         effect_stamina_next = staminaEffectNext,
         effect_horse_health_inside = horse ~= 0 and horseHealthInsideEffect or nil,
-        effect_horse_stamina_inside = horse ~= 0 and horseStaminaInsideEffect or nil,
+        effect_horse_stamina_inside = horseStaminaInsideEffect,
         innerhorse_dirt = horseDirtInner,
         outerhorse_dirt = horseDirtOuter,
         effect_horse_dirt_inside = horseDirtInsideEffect,
@@ -1196,6 +1272,34 @@ local function computeHudSuppressed()
     return false
 end
 
+-- ===========================
+-- Key input loop: cycle voice
+-- ===========================
+CreateThread(function()
+    local GROUP = 0
+    local debounceMs = 180
+    local last = 0
+
+    while true do
+        Wait(0)
+        if IsPauseMenuActive() or hudLayoutEditing then goto continue end
+
+        -- IsControlJustPressed (0x580417101DDB492F)
+        if Citizen.InvokeNative(0x580417101DDB492F, GROUP, voiceCycleControl) then
+            local now = GetGameTimer()
+            if now - last >= debounceMs then
+                if voiceCoreEnabled then
+                    cycleVoiceStep(1)
+                end
+                last = now
+            end
+        end
+
+        ::continue::
+    end
+end)
+-- ===========================
+
 local function applyHudVisibility()
     local shouldShow = hudPreference and not hudSuppressed
 
@@ -1233,6 +1337,8 @@ end
 
 -- Immediately initialise the HUD when the resource starts
 CreateThread(function()
+    hideRdrHudIcons()
+
     if PaletteMenu and PaletteMenu.Rebuild then
         PaletteMenu:Rebuild()
     end
@@ -1243,6 +1349,11 @@ CreateThread(function()
     hudSuppressed = computeHudSuppressed()
     applyHudVisibility()
     requestLayoutFromServer()
+
+    -- Apply default voice proximity once up
+    if voiceCoreEnabled then
+        applyVoiceStep(voiceStepIndex)
+    end
 
     while true do
         Wait(updateInterval)
