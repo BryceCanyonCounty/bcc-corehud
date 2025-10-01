@@ -19,6 +19,14 @@ const ICON_CLASS_MAP = {
   hunger: 'fa-solid fa-apple-whole',
   thirst: 'fa-solid fa-bottle-water',
   stress: 'fa-solid fa-face-tired',
+  messages: 'fa-solid fa-envelope',
+  clean_stats: 'fa-solid fa-soap',
+  money: null,
+  gold: null,
+  exp: 'fa-solid fa-star',
+  tokens: null,
+  player_id: 'fa-solid fa-id-badge',
+  logo: null,
   horse_health: 'fa-solid fa-horse',
   horse_stamina: 'fa-solid fa-horse-head',
   horse_dirt: null,
@@ -27,7 +35,25 @@ const ICON_CLASS_MAP = {
   default: 'fa-solid fa-circle'
 }
 
+const STAT_TYPES = new Set(['money', 'gold', 'exp', 'tokens', 'player_id'])
+const ICONLESS_TYPES = new Set(['messages', 'clean_stats', 'logo'])
+
 const ICON_IMAGE_MAP = {
+  money: {
+    default: 'cores/rpg_textures/money.png'
+  },
+  gold: {
+    default: 'cores/rpg_textures/gold.png'
+  },
+  tokens: {
+    default: 'cores/rpg_textures/token.png'
+  },
+  shield: {
+    default: 'cores/rpg_textures/shield.png'
+  },
+  messages: {
+    default: 'cores/rpg_textures/letter.png'
+  },
   health: {
     wounded: 'cores/rpg_textures/rpg_wounded.png',
     sick_01: 'cores/rpg_textures/rpg_sick_01.png',
@@ -110,6 +136,16 @@ const normaliseEffectKey = (value) => {
 }
 
 const resolveIconImage = () => {
+  if (props.type === 'logo') {
+    const logoSrc = props.meta && typeof props.meta.logo === 'string' ? props.meta.logo : null
+    if (!logoSrc || logoSrc.length === 0) {
+      return null
+    }
+    if (logoSrc.startsWith('http://') || logoSrc.startsWith('https://') || logoSrc.startsWith('nui://') || logoSrc.startsWith('data:')) {
+      return logoSrc
+    }
+    return toAssetPath(logoSrc)
+  }
   const entry = ICON_IMAGE_MAP[props.type]
   if (entry) {
     const insideKey = normaliseEffectKey(props.effectInside)
@@ -150,6 +186,9 @@ const resolveIconImage = () => {
 const iconImage = computed(resolveIconImage)
 const iconClass = computed(() => {
   if (iconImage.value) {
+    return null
+  }
+  if (ICONLESS_TYPES.has(props.type)) {
     return null
   }
 
@@ -195,6 +234,9 @@ const computeVoiceAccent = (percent) => {
 }
 
 const accentColor = computed(() => {
+  if (props.type === 'logo') {
+    return '#ffffff'
+  }
   if (props.type === 'voice') {
     const meta = voiceMeta.value
     if (meta?.talking) {
@@ -208,6 +250,9 @@ const accentColor = computed(() => {
 })
 
 const trackColor = computed(() => {
+  if (props.type === 'logo') {
+    return 'transparent'
+  }
   if (props.type === 'voice') {
     const meta = voiceMeta.value
     if (meta?.talking) {
@@ -218,6 +263,9 @@ const trackColor = computed(() => {
 })
 
 const backgroundColor = computed(() => {
+  if (props.type === 'logo') {
+    return 'transparent'
+  }
   if (props.type === 'voice') {
     const meta = voiceMeta.value
     if (meta?.talking) {
@@ -228,22 +276,35 @@ const backgroundColor = computed(() => {
 })
 
 const borderColor = computed(() => paletteEntry.value.border)
-const iconShadow = computed(() => paletteEntry.value.shadow)
+const iconShadow = computed(() => {
+  if (props.type === 'logo') {
+    return 'none'
+  }
+  return paletteEntry.value.shadow
+})
 const iconColor = computed(() => {
   if (props.type === 'voice' && voiceMeta.value?.talking) {
     return '#f8fafc'
+  }
+  if (props.type === 'logo') {
+    return '#ffffff'
   }
   return paletteEntry.value.icon
 })
 
 const coreSlotClasses = computed(() => {
-  if (props.type !== 'voice') {
-    return ['core-slot']
-  }
-
   const classes = ['core-slot']
-  if (voiceMeta.value?.talking) {
+  if (props.type === 'voice' && voiceMeta.value?.talking) {
     classes.push('core-slot--voice-talking')
+  }
+  if (props.type === 'logo') {
+    classes.push('core-slot--logo')
+    if (props.meta && typeof props.meta.logo === 'string' && props.meta.logo.length > 0) {
+      classes.push('core-slot--logo-image')
+    }
+  }
+  if (STAT_TYPES.has(props.type)) {
+    classes.push('core-slot--stat', `core-slot--stat-${props.type}`)
   }
   return classes
 })
@@ -262,6 +323,13 @@ const outerDashOffset = computed(
 )
 
 const coreFillStyle = computed(() => {
+  if (props.type === 'logo') {
+    return {
+      backgroundColor: 'transparent',
+      boxShadow: 'none',
+      color: iconColor.value
+    }
+  }
   return {
     backgroundColor: backgroundColor.value,
     boxShadow: `inset 0 0 0 1.4px ${borderColor.value}`,
@@ -270,52 +338,62 @@ const coreFillStyle = computed(() => {
 })
 
 const centerLabel = computed(() => {
-  if (props.type === 'temperature_value' && typeof props.effectNext === 'string' && props.effectNext.length > 0) {
+  if (['temperature_value', 'messages', 'clean_stats', 'logo'].includes(props.type) && typeof props.effectNext === 'string' && props.effectNext.length > 0) {
     return props.effectNext
   }
   return null
 })
+
+const sideLabel = computed(() => {
+  if (STAT_TYPES.has(props.type) && typeof props.effectNext === 'string' && props.effectNext.length > 0) {
+    return props.effectNext
+  }
+  return null
+})
+
+const isStatType = computed(() => STAT_TYPES.has(props.type))
+
+const statValue = computed(() => {
+  if (!isStatType.value) {
+    return null
+  }
+  const label = sideLabel.value
+  if (!label) {
+    return '--'
+  }
+  return label.trim() || '--'
+})
 </script>
 
 <template>
-  <div
-    :class="coreSlotClasses"
-    :style="{
-      '--accent-color': accentColor,
-      '--icon-color': iconColor,
-      '--track-color': trackColor,
-      '--inner-bg': backgroundColor,
-      '--icon-shadow': iconShadow,
-      '--inner-border': borderColor
-    }"
-  >
-    <svg class="core-gauge" viewBox="0 0 40 40" aria-hidden="true">
-      <circle
-        class="ring ring--outer-track"
-        cx="20"
-        cy="20"
-        :r="OUTER_RADIUS"
-      />
-      <circle
-        class="ring ring--outer-fill"
-        cx="20"
-        cy="20"
-        :r="OUTER_RADIUS"
-        :stroke-dasharray="OUTER_CIRCUMFERENCE"
-        :stroke-dashoffset="outerDashOffset"
-      />
-    </svg>
+  <div :class="coreSlotClasses" :style="{
+    '--accent-color': accentColor,
+    '--icon-color': iconColor,
+    '--track-color': trackColor,
+    '--inner-bg': backgroundColor,
+    '--icon-shadow': iconShadow,
+    '--inner-border': borderColor
+  }">
+    <template v-if="isStatType">
+      <span class="stat-icon-wrapper">
+        <img v-if="iconImage" class="stat-icon-img" :src="iconImage" :alt="`${type} icon`" draggable="false" />
+        <i v-else-if="iconClass" class="stat-icon" :class="iconClass" aria-hidden="true"></i>
+      </span>
+      <span class="stat-value">{{ statValue }}</span>
+    </template>
+    <template v-else>
+      <svg class="core-gauge" viewBox="0 0 40 40" aria-hidden="true">
+        <circle class="ring ring--outer-track" cx="20" cy="20" :r="OUTER_RADIUS" />
+        <circle class="ring ring--outer-fill" cx="20" cy="20" :r="OUTER_RADIUS" :stroke-dasharray="OUTER_CIRCUMFERENCE"
+          :stroke-dashoffset="outerDashOffset" />
+      </svg>
 
-    <div class="core-fill" :style="coreFillStyle"></div>
-    <img
-      v-if="iconImage"
-      class="core-icon-img"
-      :src="iconImage"
-      :alt="`${type} icon`"
-      draggable="false"
-    />
-    <i v-else-if="iconClass" class="core-icon" :class="iconClass" aria-hidden="true"></i>
-    <span v-if="centerLabel" class="core-icon-label">{{ centerLabel }}</span>
+      <div class="core-fill" :style="coreFillStyle"></div>
+      <img v-if="iconImage" class="core-icon-img" :src="iconImage" :alt="`${type} icon`" draggable="false" />
+      <i v-else-if="iconClass" class="core-icon" :class="iconClass" aria-hidden="true"></i>
+      <span v-if="centerLabel" class="core-icon-label">{{ centerLabel }}</span>
+      <span v-if="sideLabel" class="core-side-label">{{ sideLabel }}</span>
+    </template>
   </div>
 </template>
 
@@ -344,10 +422,12 @@ const centerLabel = computed(() => {
 }
 
 @keyframes voicePulse {
+
   0%,
   100% {
     transform: scale(1);
   }
+
   50% {
     transform: scale(1.08);
   }
@@ -394,7 +474,7 @@ const centerLabel = computed(() => {
   position: relative;
   z-index: 1;
   width: 2.65rem;
-  height:2.65rem;
+  height: 2.65rem;
   object-fit: contain;
   box-shadow: var(--icon-shadow);
   border-radius: 50%;
@@ -414,5 +494,103 @@ const centerLabel = computed(() => {
   color: #e2e8f0;
   text-shadow: 0 1px 2px rgba(15, 23, 42, 0.7);
   pointer-events: none;
+}
+
+.core-side-label {
+  position: absolute;
+  top: 50%;
+  left: calc(100% + 0.45rem);
+  transform: translateY(-50%);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: #e2e8f0;
+  text-shadow: 0 1px 2px rgba(15, 23, 42, 0.7);
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.core-slot--logo {
+  padding: 0;
+  background: transparent;
+  filter: none;
+  box-shadow: none;
+  border-radius: 0.75rem;
+  min-width: 4.25rem;
+  min-height: 4.25rem;
+}
+
+.core-slot--logo .core-gauge,
+.core-slot--logo .core-fill,
+.core-slot--logo .ring {
+  display: none;
+}
+
+.core-slot--logo-image .core-icon-img {
+  width: 4.25rem;
+  height: 4.25rem;
+  border-radius: 0.75rem;
+  box-shadow: none;
+}
+
+.core-slot--logo-image .core-icon-label {
+  display: none;
+}
+
+.core-slot--stat {
+  width: auto;
+  height: auto;
+  min-height: 1.9rem;
+  padding: 0;
+  border-radius: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.45rem;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  filter: none;
+}
+
+.core-slot--stat .core-gauge,
+.core-slot--stat .core-fill,
+.core-slot--stat .core-icon-img,
+.core-slot--stat .core-icon,
+.core-slot--stat .core-icon-label,
+.core-slot--stat .core-side-label {
+  display: none;
+}
+
+.stat-icon-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.4rem;
+  height: 1.4rem;
+}
+
+.stat-icon-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  user-select: none;
+  pointer-events: none;
+}
+
+.stat-icon {
+  font-size: 1.1rem;
+  color: #f1f5f9;
+}
+
+.stat-value {
+  font-family: 'Chineserok', 'Chineserok', 'Noto Sans', sans-serif;
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.015em;
+  color: #f1f5f9;
+  text-shadow: 0 1px 2px rgba(15, 23, 42, 0.65);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 </style>

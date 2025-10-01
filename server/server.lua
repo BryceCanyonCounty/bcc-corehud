@@ -1,5 +1,5 @@
 local Config = Config or {}
-
+BccUtils = exports['bcc-utils'].initiate()
 local Core = nil
 if exports and exports.vorp_core and exports.vorp_core.GetCore then
     Core = exports.vorp_core:GetCore()
@@ -12,6 +12,28 @@ local tableName = Config.DatabaseTable or 'bcc_corehud'
 local defaultNeedValue = tonumber(Config.InitialNeedValue) or 100.0
 if defaultNeedValue < 0.0 then defaultNeedValue = 0.0 end
 if defaultNeedValue > 100.0 then defaultNeedValue = 100.0 end
+
+local DEFAULT_LAYOUT = {
+    money = { x = 92.624, y = 18.185 },
+    gold = { x = 92.729, y = 20.573 },
+    exp = { x = 92.574, y = 23.056 },
+    tokens = { x = 93.406, y = 25.63 },
+    player_id = { x = 91.584, y = 28.167 },
+    health = { x = 11.469, y = 74.636 },
+    stamina = { x = 8.969, y = 73.782 },
+    hunger = { x = 4.437, y = 76.911 },
+    thirst = { x = 6.521, y = 74.668 },
+    stress = { x = 3.292, y = 93.444 },
+    clean_stats = { x = 15.75, y = 89.0 },
+    messages = { x = 14.865, y = 93.204 },
+    voice = { x = 2.042, y = 84.748 },
+    logo = { x = 1.771, y = 78.397 },
+    temperature = { x = 2.833, y = 80.629 },
+    temperature_value = { x = 2.146, y = 89.687 },
+    horse_health = { x = 15.073, y = 80.37 },
+    horse_stamina = { x = 13.563, y = 76.815 },
+    horse_dirt = { x = 15.906, y = 84.556 }
+}
 
 local playerStates = {}
 local characterSources = {}
@@ -43,6 +65,13 @@ local STRING_INDEX = {}
 
 local NEED_KEYS = { 'hunger', 'thirst', 'stress' }
 
+local BALANCE_EVENT_MAP = {
+    Money = { cacheKey = 'money', event = 'bcc-corehud:setMoney' },
+    Gold  = { cacheKey = 'gold', event = 'bcc-corehud:setGold' },
+    Rol   = { cacheKey = 'tokens', event = 'bcc-corehud:setTokens' },
+    Xp    = { cacheKey = 'exp', event = 'bcc-corehud:setExp' }
+}
+
 local function debugPrint(...)
     if not debugEnabled then
         return
@@ -70,10 +99,70 @@ end
 local function ensurePlayerState(src)
     local state = playerStates[src]
     if not state then
-        state = { needs = {}, palette = nil, layout = nil }
+        state = { needs = {}, palette = nil, layout = nil, balances = {} }
         playerStates[src] = state
+        return state
+    end
+
+    if not state.balances then
+        state.balances = {}
     end
     return state
+end
+
+local function sourceFromStateBagName(bagName)
+    if type(bagName) ~= 'string' then
+        return nil
+    end
+
+    if GetPlayerFromStateBagName then
+        local player = GetPlayerFromStateBagName(bagName)
+        if player then
+            local num = tonumber(player)
+            if num then
+                return num
+            end
+        end
+    end
+
+    local id = bagName:match('player:(%d+)')
+    return id and tonumber(id) or nil
+end
+
+local function pushBalanceValue(src, meta, rawValue)
+    local state = ensurePlayerState(src)
+    local balances = state.balances
+    local cacheKey = meta.cacheKey
+
+    if rawValue == nil then
+        if balances[cacheKey] ~= nil then
+            balances[cacheKey] = nil
+            TriggerClientEvent(meta.event, src, nil)
+        end
+        return
+    end
+
+    local amount = tonumber(rawValue)
+    if not amount then
+        return
+    end
+
+    if balances[cacheKey] == amount then
+        return
+    end
+
+    balances[cacheKey] = amount
+    TriggerClientEvent(meta.event, src, amount)
+end
+
+local function syncBalancesFromState(src, data)
+    if type(data) ~= 'table' then
+        return
+    end
+
+    for stateKey, meta in pairs(BALANCE_EVENT_MAP) do
+        pushBalanceValue(src, meta, data[stateKey])
+    end
 end
 
 local function resolveSource(characterId)
@@ -476,6 +565,16 @@ local function sanitizeLayout(layout)
     return sanitized
 end
 
+local function cloneDefaultLayout()
+    local copy = {}
+    for key, value in pairs(DEFAULT_LAYOUT) do
+        if type(value) == 'table' then
+            copy[key] = { x = tonumber(value.x) or 0, y = tonumber(value.y) or 0 }
+        end
+    end
+    return copy
+end
+
 local function decodeLayout(raw)
     if type(raw) ~= 'string' or raw == '' then
         return nil
@@ -684,6 +783,12 @@ local function applyStoredPalette(src, characterId)
     end
 
     local layout = decodeLayout(row.layout_json)
+    if not layout then
+        layout = sanitizeLayout(cloneDefaultLayout())
+        if layout then
+            persistLayout(characterId, layout)
+        end
+    end
     state.layout = layout
     TriggerClientEvent('bcc-corehud:layout:apply', src, layout)
 
@@ -777,6 +882,13 @@ RegisterNetEvent('bcc-corehud:layout:request', function()
         local row = loadCharacterRecord(characterId)
         if row then
             layout = decodeLayout(row.layout_json)
+        end
+
+        if not layout then
+            layout = sanitizeLayout(cloneDefaultLayout())
+            if layout then
+                persistLayout(characterId, layout)
+            end
         end
 
         state.layout = layout
@@ -971,4 +1083,59 @@ end
 CreateThread(function()
     Wait(1000)
     registerNeedItems()
+end)
+
+-- Keep money/gold/xp/tokens in sync whenever VORP updates the Character state bag.
+AddStateBagChangeHandler('Character', nil, function(bagName, key, value)
+    local src = sourceFromStateBagName(bagName)
+    if not src or not GetPlayerName(src) then
+        return
+    end
+
+    if value == nil then
+        for _, meta in pairs(BALANCE_EVENT_MAP) do
+            pushBalanceValue(src, meta, nil)
+        end
+        return
+    end
+
+    syncBalancesFromState(src, value)
+end)
+
+local function toNum(v) v = tonumber(v); return (v and v == v) and v or 0 end
+
+BccUtils.RPC:Register('bcc-corehud:getBalances', function(params, cb, src)
+    local target = tonumber(params and params.targetId) or src
+    if not target or not GetPlayerName(target) then
+        cb({ ok = false, message = 'Target not online' })
+        return
+    end
+
+    -- Optional: allow refreshing others only if caller has an ACE
+    if target ~= src and not IsPlayerAceAllowed(src, 'bcc-corehud.refresh.others') then
+        cb({ ok = false, message = 'Not allowed to inspect another player' })
+        return
+    end
+
+    local user = getUser(target)
+    if not user then
+        cb({ ok = false, message = 'User not found' })
+        return
+    end
+
+    local character = getCharacterFromUser(user)
+    if not character then
+        cb({ ok = false, message = 'Character not found' })
+        return
+    end
+
+    local data = {
+        money = toNum(character.money),
+        gold  = toNum(character.gold),
+        rol   = toNum(character.rol), -- we map this to HUD "tokens"
+        xp    = toNum(character.xp),
+        target = target
+    }
+
+    cb({ ok = true, data = data })
 end)

@@ -72,7 +72,7 @@ All options live in `config.lua`. The table below highlights the most relevant g
 | Option | Default | Notes |
 |--------|---------|-------|
 | `Config.AutoShowHud` | `false` | Auto-toggle HUD on spawn. If `false`, players must run `/togglehud`. |
-| `Config.UpdateInterval` | `1000` ms | Frequency of HUD snapshots sent to the UI. |
+| `Config.UpdateInterval` | `5000` ms | Frequency of HUD snapshots sent to the UI. |
 | `Config.LowCoreWarning` | `25.0` | Percent threshold that triggers the “wounded/drained/starving/parched/stressed” labels. |
 | `Config.Debug` | `true` | Enables verbose client logging. |
 | `Config.HorseDirtyThreshold` | `4` | Attribute rank (0–10) that enables the dirty horse badge. Set to `false` to disable the core. |
@@ -86,10 +86,11 @@ All options live in `config.lua`. The table below highlights the most relevant g
 | `Config.NeedsResourceName` | `false` | Name of a resource exposing `GetNeedsData()`. When provided, the HUD polls it instead of using local decay. |
 | `Config.NeedsAutoDecay` | `true` | Master toggle for built-in hunger/thirst decay when no external resource is configured. |
 | `Config.NeedsDecayStartDelay` | `300.0` sec | Grace period after eating/drinking before decay resumes. |
-| `Config.HungerDecayDuration` | `1800.0` sec | Time for hunger to drain from full to empty once decay begins. |
-| `Config.ThirstDecayDuration` | `1200.0` sec | Same for thirst. |
-| `Config.HotThirstMultiplier` | `2.0` | Extra thirst decay when overheating. |
-| `Config.CrossNeedDecayMultiplier` | `1.5` | Multiplier applied to the remaining need when the other is empty. |
+| `Config.HungerRate` | `0.10` %/sec | Percent-per-second hunger decay applied once the grace delay expires. |
+| `Config.MountedHungerRate` | `0.10` %/sec | Hunger decay applied while riding a mount. |
+| `Config.ThirstRate` | `0.15` %/sec | Percent-per-second thirst decay applied once the grace delay expires. |
+| `Config.MountedThirstRate` | `0.15` %/sec | Thirst decay applied while riding a mount. |
+| `Config.ActivityMultipliers` | table | Per-activity hunger/thirst modifiers used while idle/walking/running/sprinting/coasting/swimming. |
 | `Config.StarvationDamageDelay` | `120.0` sec | Delay after both hunger and thirst hit zero before health damage starts. |
 | `Config.StarvationDamageInterval` | `10.0` sec | Interval between starvation ticks. |
 | `Config.StarvationDamageAmount` | `4.0` HP | Damage applied each tick once starving begins. |
@@ -102,9 +103,12 @@ All options live in `config.lua`. The table below highlights the most relevant g
 | `Config.TemperatureHotThreshold` | `26.0` °C | Threshold for the hot icon. |
 | `Config.AlwaysShowTemperature` | `true` | Keeps the degree core active even without a temperature effect; the hot/cold icon still appears only during extremes. |
 | `Config.TemperatureMin` / `Max` | `-15.0` / `40.0` | Range mapped to the temperature meter used for the degree core. |
-| `Config.TemperatureDamageDelay` | `5.0` sec | Delay before hot/cold damage is applied. |
-| `Config.HotTemperatureDamagePerSecond` | `0.5` | Health damage per second when overheating. |
-| `Config.ColdTemperatureDamagePerSecond` | `0.5` | Health damage per second when freezing. |
+| `Config.MinTemp` / `Config.MaxTemp` | `-5.0` / `31.0` °C | Safe temperature band; outside it you take damage and (if hot) lose thirst. |
+| `Config.RemoveHealth` | `5` HP | Health removed per HUD tick while in unsafe temperatures. |
+| `Config.HotTempThirstDrain` | `1.5` % | Additional thirst removed per HUD tick while above `Config.MaxTemp`. |
+| `Config.TempWarningMessage` | text | Message pushed when overheating (set empty to disable). |
+| `Config.TempWarningCooldown` | `10.0` sec | Delay before the overheat warning can show again. |
+| `Config.DoHealthDamageFx` / `Config.DoHealthPainSound` | `true` / `true` | Toggle the optional FX & audio for temperature damage. |
 
 ### Persistence & Database
 

@@ -13,6 +13,14 @@ const isLayoutEditing = computed(() => layoutEditingInjection?.value === true)
 
 const PERMANENT_PLACEHOLDERS = new Set([
   'voice',
+  'messages',
+  'clean_stats',
+  'money',
+  'gold',
+  'exp',
+  'tokens',
+  'player_id',
+  'logo',
   'temperature',
   'temperature_value',
   'horse_health',
@@ -55,6 +63,70 @@ const buildPlaceholderSlot = () => {
         effectNext: null,
         meta: null
       }
+    case 'messages':
+      return {
+        inner: 15,
+        outer: 99,
+        effectInside: null,
+        effectNext: '0',
+        meta: null
+      }
+    case 'clean_stats':
+      return {
+        inner: 15,
+        outer: 99,
+        effectInside: null,
+        effectNext: '100%',
+        meta: null
+      }
+    case 'money':
+      return {
+        inner: 15,
+        outer: 99,
+        effectInside: null,
+        effectNext: '$0',
+        meta: null
+      }
+    case 'gold':
+      return {
+        inner: 15,
+        outer: 99,
+        effectInside: null,
+        effectNext: 'G 0',
+        meta: null
+      }
+    case 'exp':
+      return {
+        inner: 15,
+        outer: 99,
+        effectInside: null,
+        effectNext: 'XP 0',
+        meta: null
+      }
+    case 'tokens':
+      return {
+        inner: 15,
+        outer: 99,
+        effectInside: null,
+        effectNext: 'T 0',
+        meta: null
+      }
+    case 'player_id':
+      return {
+        inner: 15,
+        outer: 99,
+        effectInside: null,
+        effectNext: 'ID 0',
+        meta: null
+      }
+    case 'logo':
+      return {
+        inner: 15,
+        outer: 99,
+        effectInside: null,
+        effectNext: 'LOGO',
+        meta: { logo: null }
+      }
     default:
       return {
         inner: 15,
@@ -90,6 +162,13 @@ const slotData = computed(() => {
   const meta = {}
   if (typeof source.talking !== 'undefined') {
     meta.talking = source.talking === true || source.talking === 1 || source.talking === 'true'
+  }
+
+  if (props.type === 'logo') {
+    const logoSrc = typeof source.image === 'string' ? source.image : null
+    if (logoSrc && logoSrc.length > 0) {
+      meta.logo = logoSrc
+    }
   }
 
   const proximityPercentRaw = source.proximityPercent ?? source.proximity

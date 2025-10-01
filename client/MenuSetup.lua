@@ -1,559 +1,366 @@
-PaletteMenu = PaletteMenu or {}
-local PM = PaletteMenu
-
-local CORE_PALETTE_ORDER = {
-    'health',
-    'stamina',
-    'hunger',
-    'thirst',
-    'stress',
-    'temperature',
-    'horse_health',
-    'horse_stamina',
-    'horse_dirt',
-    'voice'
+-- ---------- config ----------
+local CORE_KEYS = {
+    { key = 'health',        label = 'Health' },
+    { key = 'stamina',       label = 'Stamina' },
+    { key = 'hunger',        label = 'Hunger' },
+    { key = 'thirst',        label = 'Thirst' },
+    { key = 'stress',        label = 'Stress' },
+    { key = 'messages',      label = 'Messages' },
+    { key = 'clean_stats',   label = 'Cleanliness' },
+    { key = 'money',        label = 'Money' },
+    { key = 'gold',         label = 'Gold' },
+    { key = 'exp',          label = 'Experience' },
+    { key = 'tokens',       label = 'Tokens' },
+    { key = 'logo',         label = 'Logo' },
+    { key = 'temperature',   label = 'Temperature' },
+    { key = 'horse_health',  label = 'Horse Health' },
+    { key = 'horse_stamina', label = 'Horse Stamina' },
+    { key = 'horse_dirt',    label = 'Horse Dirtiness' },
+    { key = 'voice',         label = 'Voice' },
 }
+local LAST_PALETTE_SNAPSHOT = nil
+local FIRST_SPAWN_DONE = false
 
-local CORE_LABELS = {
-    health = 'Health',
-    stamina = 'Stamina',
-    hunger = 'Hunger',
-    thirst = 'Thirst',
-    stress = 'Stress',
-    temperature = 'Temperature',
-    horse_health = 'Horse Health',
-    horse_stamina = 'Horse Stamina',
-    horse_dirt = 'Horse Dirtiness',
-    voice = 'Voice'
-}
+local function clamp(v, lo, hi)
+    v = tonumber(v) or 0; if v < lo then return lo end; if v > hi then return hi end; return v
+end
+local function numberFromSlider(v)
+    if type(v) == "table" then
+        local n = v.value
+        if type(n) == "table" then n = n.value end
+        return tonumber(n) or 0
+    end
+    return tonumber(v) or 0
+end
 
-local COLORFUL_PRESET = {
-    health = { hue = 280, saturation = 65 },
-    stamina = { hue = 205, saturation = 70 },
-    hunger = { hue = 25, saturation = 78 },
-    thirst = { hue = 195, saturation = 70 },
-    stress = { hue = 5, saturation = 82 },
-    temperature = { hue = 50, saturation = 80 },
-    horse_health = { hue = 145, saturation = 65 },
+-- defaults
+local PALETTE = {
+    health        = { hue = 280, saturation = 65 },
+    stamina       = { hue = 205, saturation = 70 },
+    hunger        = { hue = 25, saturation = 78 },
+    thirst        = { hue = 195, saturation = 70 },
+    stress        = { hue = 5, saturation = 82 },
+    messages      = { hue = 335, saturation = 75 },
+    clean_stats   = { hue = 120, saturation = 70 },
+    money         = { hue = 140, saturation = 65 },
+    gold          = { hue = 45,  saturation = 80 },
+    exp           = { hue = 210, saturation = 70 },
+    tokens        = { hue = 275, saturation = 72 },
+    logo          = { hue = 0,   saturation = 0 },
+    temperature   = { hue = 50, saturation = 80 },
+    horse_health  = { hue = 145, saturation = 65 },
     horse_stamina = { hue = 210, saturation = 70 },
-    horse_dirt = { hue = 44, saturation = 78 },
-    voice = { hue = 165, saturation = 65 }
+    horse_dirt    = { hue = 44, saturation = 78 },
+    voice         = { hue = 165, saturation = 65 },
 }
 
-local function clampValue(value, minValue, maxValue)
-    if value < minValue then
-        return minValue
-    end
-    if value > maxValue then
-        return maxValue
-    end
-    return value
+-- colorful preset
+local COLORFUL_PRESET = {
+    health        = { hue = 280, saturation = 65 },
+    stamina       = { hue = 205, saturation = 70 },
+    hunger        = { hue = 25, saturation = 78 },
+    thirst        = { hue = 195, saturation = 70 },
+    stress        = { hue = 5, saturation = 82 },
+    messages      = { hue = 335, saturation = 75 },
+    clean_stats   = { hue = 120, saturation = 70 },
+    money         = { hue = 140, saturation = 65 },
+    gold          = { hue = 45,  saturation = 80 },
+    exp           = { hue = 210, saturation = 70 },
+    tokens        = { hue = 275, saturation = 72 },
+    logo          = { hue = 0,   saturation = 0 },
+    temperature   = { hue = 50, saturation = 80 },
+    horse_health  = { hue = 145, saturation = 65 },
+    horse_stamina = { hue = 210, saturation = 70 },
+    horse_dirt    = { hue = 44, saturation = 78 },
+    voice         = { hue = 165, saturation = 65 },
+}
+
+-- all-white preset
+local function makeWhitePreset()
+    local p = {}
+    for _, spec in ipairs(CORE_KEYS) do p[spec.key] = { hue = 0, saturation = 0 } end
+    return p
+end
+local WHITE_PRESET = makeWhitePreset()
+
+-- keep both ids and handles so we can read & update
+local SLIDER_REFS = {} -- [key] = { hueId=..., hue=<class>, satId=..., saturation=<class> }
+local PALETTE_PAGE = nil
+
+-- ---------- NUI payload ----------
+local function hsl(h, s, l, a)
+    h = clamp(math.floor(h + 0.5), 0, 360)
+    s = clamp(math.floor(s + 0.5), 0, 100)
+    l = clamp(math.floor(l + 0.5), 0, 100)
+    if a ~= nil then return ('hsla(%d, %d%%, %d%%, %.2f)'):format(h, s, l, clamp(a, 0, 1)) end
+    return ('hsl(%d, %d%%, %d%%)'):format(h, s, l)
 end
 
-function PM:Debug(...)
-    if not self.debugEnabled then
-        return
-    end
-
-    print('[BCC-CoreHUD][Palette]', ...)
+local function computePaletteEntry(hue, sat)
+    return {
+        accent     = hsl(hue, sat, 58),
+        icon       = '#ffffff',
+        background = hsl(hue, math.floor(sat * 0.45), 18, 0.6),
+        track      = hsl(hue, math.max(12, math.floor(sat * 0.35)), 85, 0.35),
+        border     = hsl(hue, math.max(20, math.floor(sat * 0.75)), 70, 0.45),
+        shadow     = '0 18px 28px rgba(8, 13, 23, 0.45)',
+    }
 end
 
-function PM:CreateDefaultSettings()
-    local settings = { default = { hue = 0, saturation = 0 } }
-    for _, key in ipairs(CORE_PALETTE_ORDER) do
-        settings[key] = { hue = 0, saturation = 0 }
+local function paletteSnapshotToNuiPayload(snapshot)
+    local out = {}
+    if type(snapshot) == 'table' then
+        for _, spec in ipairs(CORE_KEYS) do
+            local k = spec.key; local e = snapshot[k]
+            if type(e) == 'table' then
+                local h = clamp(tonumber(e.hue) or 0, 0, 360)
+                local s = clamp(tonumber(e.saturation) or 0, 0, 100)
+                out[k] = computePaletteEntry(h, s)
+            end
+        end
     end
-    return settings
+    out.default = computePaletteEntry(0, 0)
+    return { type = 'palette', palette = out }
 end
 
-function PM:Init(options)
-    options = options or {}
-    self.debugEnabled = options.debugEnabled == true
-    self.settings = self:CreateDefaultSettings()
-    self.sliderRefs = {}
-    self.featherMenu = nil
-    self.menuHandle = nil
-    self.pageHandle = nil
-    self.menuOpen = false
-    self.lastSave = 0
-    self.saveTimer = nil
-    self.pendingSave = false
-    self.applying = false
-    self:SendPaletteToUI()
+local function pushPaletteToHud(snapshot)
+    LAST_PALETTE_SNAPSHOT = snapshot
+    SendNUIMessage(paletteSnapshotToNuiPayload(snapshot))
+end
+
+local function requestPaletteFromServer()
     TriggerServerEvent('bcc-corehud:palette:request')
 end
 
-local function mergeInto(target, source)
-    if type(source) ~= 'table' then
-        return target
-    end
-
-    if type(target) ~= 'table' then
-        target = {}
-    end
-
-    for key, value in pairs(source) do
-        target[key] = value
-    end
-
-    return target
-end
-
-function PM:Reset()
-    self:ApplySnapshot(nil)
-    self:QueueSave()
-end
-
-local function executeClientCommand(command)
-    if type(command) ~= 'string' or command == '' then
-        return
-    end
-
-    local runner = ExecuteCommand
-    if type(runner) == 'function' then
-        runner(command)
-    end
-end
-
-function PM:ApplyPreset(preset)
-    self:ApplySnapshot(preset or COLORFUL_PRESET)
-    self:QueueSave()
-end
-
-function PM:GetSnapshot()
-    local snapshot = {}
-    for _, key in ipairs(CORE_PALETTE_ORDER) do
-        local entry = self.settings[key] or { hue = 0, saturation = 0 }
-        snapshot[key] = {
-            hue = clampValue(tonumber(entry.hue) or 0, 0, 360),
-            saturation = clampValue(tonumber(entry.saturation) or 0, 0, 100)
-        }
-    end
-
-    local default = self.settings.default or { hue = 0, saturation = 0 }
-    snapshot.default = {
-        hue = clampValue(tonumber(default.hue) or 0, 0, 360),
-        saturation = clampValue(tonumber(default.saturation) or 0, 0, 100)
-    }
-    return snapshot
-end
-
-function PM:ComputePaletteEntry(hue, saturation)
-    local function hsl(h, s, l, a)
-        h = clampValue(math.floor(h + 0.5), 0, 360)
-        s = clampValue(math.floor(s + 0.5), 0, 100)
-        l = clampValue(math.floor(l + 0.5), 0, 100)
-
-        if a ~= nil then
-            a = clampValue(a, 0.0, 1.0)
-            return ('hsla(%d, %d%%, %d%%, %.2f)'):format(h, s, l, a)
-        end
-
-        return ('hsl(%d, %d%%, %d%%)'):format(h, s, l)
-    end
-
-    local accent = hsl(hue, saturation, 58)
-    local background = hsl(hue, math.floor(saturation * 0.45), 18, 0.6)
-    local track = hsl(hue, math.max(12, math.floor(saturation * 0.35)), 85, 0.35)
-    local border = hsl(hue, math.max(20, math.floor(saturation * 0.75)), 70, 0.45)
-
-    return {
-        accent = accent,
-        icon = '#ffffff',
-        background = background,
-        track = track,
-        border = border,
-        shadow = '0 18px 28px rgba(8, 13, 23, 0.45)'
-    }
-end
-
-function PM:BuildUiPayload()
-    local payload = {}
-    for _, key in ipairs(CORE_PALETTE_ORDER) do
-        local entry = self.settings[key] or { hue = 0, saturation = 0 }
-        payload[key] = self:ComputePaletteEntry(entry.hue, entry.saturation)
-    end
-
-    local defaultEntry = self.settings.default or { hue = 0, saturation = 0 }
-    payload.default = self:ComputePaletteEntry(defaultEntry.hue, defaultEntry.saturation)
-    return payload
-end
-
-function PM:SendPaletteToUI()
-    SendNUIMessage({
-        type = 'palette',
-        palette = self:BuildUiPayload()
-    })
-end
-
-function PM:RefreshSliders()
-    if not self.pageHandle then
-        return
-    end
-
-    local canBroadcast = self:IsMenuActive()
-
-    for _, key in ipairs(CORE_PALETTE_ORDER) do
-        local refs = self.sliderRefs[key]
-        local settings = self.settings[key]
-        if refs and settings then
-            local huePayload = { value = settings.hue, start = settings.hue }
-            if refs.hueId then
-                local element = self.pageHandle.RegisteredElements and
-                    self.pageHandle.RegisteredElements[refs.hueId]
-                if element then
-                    element.data = mergeInto(element.data, huePayload)
-                end
-
-                local class = self.pageHandle.RegistedElementsClasses and
-                    self.pageHandle.RegistedElementsClasses[refs.hueId]
-                if class and class ~= refs.hue then
-                    -- keep element class in sync in case feather regenerates references
-                    refs.hue = class
-                end
-            end
-
-            if refs.hue and canBroadcast then
-                local ok, err = pcall(refs.hue.update, refs.hue, huePayload)
-                if not ok then
-                    self:Debug('Failed to update hue slider', key, err)
-                end
-            end
-
-            local satPayload = { value = settings.saturation, start = settings.saturation }
-            if refs.saturationId then
-                local element = self.pageHandle.RegisteredElements and
-                    self.pageHandle.RegisteredElements[refs.saturationId]
-                if element then
-                    element.data = mergeInto(element.data, satPayload)
-                end
-
-                local class = self.pageHandle.RegistedElementsClasses and
-                    self.pageHandle.RegistedElementsClasses[refs.saturationId]
-                if class and class ~= refs.saturation then
-                    refs.saturation = class
-                end
-            end
-
-            if refs.saturation and canBroadcast then
-                local ok, err = pcall(refs.saturation.update, refs.saturation, satPayload)
-                if not ok then
-                    self:Debug('Failed to update saturation slider', key, err)
-                end
-            end
-        end
-    end
-end
-
-function PM:IsMenuActive()
-    if not FeatherMenu or not self.menuId then
-        return false
-    end
-
-    local active = FeatherMenu.activeMenu
-    if type(active) ~= 'table' or active.menuID ~= self.menuId then
-        return false
-    end
-
-    return true
-end
-
-function PM:EnsureFeather()
-    if FeatherMenu ~= nil then
-        return true
-    end
-
-    if GetResourceState('feather-menu') ~= 'started' then
-        self:Debug('feather-menu resource is not started')
-        return false
-    end
-
-    local ok, menu = pcall(function()
-        return exports['feather-menu']:initiate()
-    end)
-
-    if not ok or not menu then
-        self:Debug('Failed to initiate feather-menu: ' .. tostring(menu))
-        return false
-    end
-
-    FeatherMenu = menu
-    return true
-end
-
-function PM:EnsureMenu()
-    if self.menuHandle then
-        return true
-    end
-
-    if not self:EnsureFeather() then
-        return false
-    end
-
-    local menuRef = self
-
-    self.menuId = 'bcc-corehud:palette'
-
-    self.menuHandle = FeatherMenu:RegisterMenu(self.menuId, {
-        top = '3%',
-        left = '3%',
-        ['720width'] = '400px',
-        ['1080width'] = '500px',
-        ['2kwidth'] = '600px',
-        ['4kwidth'] = '800px',
-        style = {
-            --['background-image'] = 'url("nui://bcc-craft/assets/background.png")',
-            --['background-size'] = 'cover',  
-            --['background-repeat'] = 'no-repeat',
-                --['background-position'] = 'center',
-                --['background-color'] = 'rgba(55, 33, 14, 0.7)', -- A leather-like brown
-                --['border'] = '1px solid #654321', 
-                --['font-family'] = 'Times New Roman, serif', 
-                --['font-size'] = '38px',
-                --['color'] = '#ffffff', 
-                --['padding'] = '10px 20px',
-                --['margin-top'] = '5px',
-                --['cursor'] = 'pointer', 
-                --['box-shadow'] = '3px 3px #333333', 
-                --['text-transform'] = 'uppercase', 
-        },
-        contentslot = {
-            style = {
-                ['height'] = '450px',
-                ['min-height'] = '300px'
-            }
-        },
-    }, {
-        closed = function()
-            menuRef.menuOpen = false
-            DisplayRadar(true)
-        end,
-        opened = function()
-            menuRef.menuOpen = true
-            DisplayRadar(false)
-            menuRef:RefreshSliders()
-        end
-    })
-
-    FeatherHudMenu = self.menuHandle
-
-    self.pageHandle = self.menuHandle:RegisterPage('bcc-corehud:palette:main')
-
-    self.pageHandle:RegisterElement('header', {
-        value = 'HUD Palette',
-        slot = 'header'
-    })
-
-    self.pageHandle:RegisterElement('subheader', {
-        value = 'Adjust the HUD colors in real-time',
-        slot = 'header'
-    })
-
-    self.pageHandle:RegisterElement('line', {
-        slot = 'header'
-    })
-
-    for _, key in ipairs(CORE_PALETTE_ORDER) do
-        local label = CORE_LABELS[key] or key
-        local settings = self.settings[key]
-        local entryRefs = {}
-
-        self.pageHandle:RegisterElement('subheader', {
-            value = label,
-            slot = 'content',
-            style = {
-                ['margin-top'] = '6px'
-            }
-        })
-
-        local statKey = key
-        entryRefs.hueId = ('bcc-corehud:palette:%s:hue'):format(statKey)
-        entryRefs.hue = self.pageHandle:RegisterElement('slider', {
-            id = entryRefs.hueId,
-            label = 'Hue',
-            start = settings.hue,
-            slot = 'content',
-            min = 0,
-            max = 360,
-            steps = 1
-        }, function(data)
-            self:OnSliderChanged(statKey, 'hue', data.value)
-        end)
-
-        entryRefs.saturationId = ('bcc-corehud:palette:%s:saturation'):format(statKey)
-        entryRefs.saturation = self.pageHandle:RegisterElement('slider', {
-            id = entryRefs.saturationId,
-            label = 'Saturation',
-            start = settings.saturation,
-            slot = 'content',
-            min = 0,
-            max = 100,
-            steps = 1
-        }, function(data)
-            self:OnSliderChanged(statKey, 'saturation', data.value)
-        end)
-
-        self.pageHandle:RegisterElement('line', {
-            slot = 'content'
-        })
-
-        self.sliderRefs[statKey] = entryRefs
-    end
-
-    self.pageHandle:RegisterElement('line', {
-        slot = 'content'
-    })
-
-    self.pageHandle:RegisterElement('subheader', {
-        value = 'HUD Controls',
-        slot = 'content',
-        style = {
-            ['margin-top'] = '8px'
-        }
-    })
-
-    self.pageHandle:RegisterElement('button', {
-        label = 'Toggle Layout Editor (/hudlayout)',
-        slot = 'content'
-    }, function()
-        if self.menuHandle then
-            self.menuHandle:Close()
-        end
-        executeClientCommand('hudlayout')
-    end)
-
-    self.pageHandle:RegisterElement('button', {
-        label = 'Toggle HUD Visibility (/togglehud)',
-        slot = 'content'
-    }, function()
-        if type(ToggleUI) == 'function' then
-            ToggleUI()
-        else
-            executeClientCommand('togglehud')
-        end
-    end)
-
-    self.pageHandle:RegisterElement('button', {
-        label = 'Reopen Palette Menu (/hudpalette)',
-        slot = 'content'
-    }, function()
-        if self.menuHandle then
-            self.menuHandle:Close()
-        end
-        executeClientCommand('hudpalette')
-    end)
-
-    self.pageHandle:RegisterElement('button', {
-        label = 'Apply Colorful Preset',
-        slot = 'footer'
-    }, function()
-        self:ApplyPreset(COLORFUL_PRESET)
-    end)
-
-    self.pageHandle:RegisterElement('button', {
-        label = 'Reset to White',
-        slot = 'footer'
-    }, function()
-        self:Reset()
-    end)
-
-    self.pageHandle:RegisterElement('bottomline', {
-        slot = 'footer'
-    })
-
-    return true
-end
-
-function PM:Open()
-    if not self:EnsureMenu() then
-        print('[BCC-CoreHUD] Feather menu is unavailable. Ensure `feather-menu` is running.')
-        return
-    end
-
-    if not self:IsMenuActive() then
-        self.menuHandle:Open({ startupPage = self.pageHandle })
-    else
-        self:RefreshSliders()
-    end
-end
-
-function PM:Rebuild()
-    self:SendPaletteToUI()
-end
-
-function PM:ApplySnapshot(snapshot)
-    self.applying = true
-
-    if type(snapshot) ~= 'table' then
-        self.settings = self:CreateDefaultSettings()
-    else
-        local settings = self:CreateDefaultSettings()
-        for _, key in ipairs(CORE_PALETTE_ORDER) do
-            local entry = snapshot[key]
-            if type(entry) == 'table' then
-                settings[key].hue = clampValue(tonumber(entry.hue) or 0, 0, 360)
-                settings[key].saturation = clampValue(tonumber(entry.saturation) or 0, 0, 100)
-            end
-        end
-
-        if type(snapshot.default) == 'table' then
-            settings.default.hue = clampValue(tonumber(snapshot.default.hue) or 0, 0, 360)
-            settings.default.saturation = clampValue(tonumber(snapshot.default.saturation) or 0, 0, 100)
-        end
-
-        self.settings = settings
-    end
-
-    self:SendPaletteToUI()
-    self:RefreshSliders()
-
-    self.applying = false
-end
-
-function PM:OnSliderChanged(statKey, field, value)
-    local entry = self.settings[statKey]
-    if not entry then
-        return
-    end
-
-    local numeric = tonumber(value) or 0
-    if field == 'hue' then
-        entry.hue = clampValue(math.floor(numeric + 0.5), 0, 360)
-    else
-        entry.saturation = clampValue(math.floor(numeric + 0.5), 0, 100)
-    end
-
-    self:SendPaletteToUI()
-
-    if not self.applying then
-        self:QueueSave()
-    end
-end
-
-function PM:SendSave()
-    local snapshot = self:GetSnapshot()
-    TriggerServerEvent('bcc-corehud:palette:save', snapshot)
-    self.lastSave = GetGameTimer()
-end
-
-function PM:QueueSave()
-    if self.saveTimer then
-        self.pendingSave = true
-        return
-    end
-
-    self.saveTimer = true
-    CreateThread(function()
-        Wait(1500)
-        self.saveTimer = false
-        self:SendSave()
-        if self.pendingSave then
-            self.pendingSave = false
-            self:QueueSave()
-        end
-    end)
-end
-
+-- Server -> Client: apply saved palette (already exists on your server)
 RegisterNetEvent('bcc-corehud:palette:apply', function(snapshot)
-    PaletteMenu:ApplySnapshot(snapshot)
+    -- remember + push to HUD
+    pushPaletteToHud(snapshot)
 end)
+
+-- Ask once when the resource starts (handles resource reloads)
+AddEventHandler('onClientResourceStart', function(res)
+    if res == GetCurrentResourceName() then
+        -- give NUI a moment if it’s loading
+        CreateThread(function()
+            Wait(300)
+            requestPaletteFromServer()
+        end)
+    end
+end)
+
+-- Ask again on first spawn (covers fresh login/character select)
+AddEventHandler('playerSpawned', function()
+    if not FIRST_SPAWN_DONE then
+        FIRST_SPAWN_DONE = true
+        requestPaletteFromServer()
+    end
+end)
+
+-- Optional: if your UI sends a "ready" ping after it reloads, re-send the last palette
+-- Hook your NUI to call: fetch('https://<resource>/paletteReady', { method:'POST' })
+RegisterNUICallback('paletteReady', function(_, cb)
+    if LAST_PALETTE_SNAPSHOT then
+        pushPaletteToHud(LAST_PALETTE_SNAPSHOT)
+    else
+        -- nothing cached yet: ask server
+        requestPaletteFromServer()
+    end
+    if cb then cb('ok') end
+end)
+
+local function buildPalettePayload()
+    local out = {}
+    for _, spec in ipairs(CORE_KEYS) do
+        local k = spec.key
+        local e = PALETTE[k] or { hue = 0, saturation = 0 }
+        out[k] = computePaletteEntry(e.hue, e.saturation)
+    end
+    out.default = computePaletteEntry(0, 0) -- fallback theme
+    return { type = 'palette', palette = out }
+end
+
+local function sendPaletteToNui()
+    SendNUIMessage(buildPalettePayload())
+end
+
+-- ---------- state setters ----------
+local function updateSliderHandle(handle, newValue)
+    if handle and handle.update then handle:update({ value = newValue }) end
+end
+
+local function setHue(statKey, value, reflectSliders)
+    local v = clamp(value, 0, 360)
+    PALETTE[statKey] = PALETTE[statKey] or { hue = 0, saturation = 0 }
+    PALETTE[statKey].hue = v
+    if reflectSliders and SLIDER_REFS[statKey] then updateSliderHandle(SLIDER_REFS[statKey].hue, v) end
+end
+
+local function setSaturation(statKey, value, reflectSliders)
+    local v = clamp(value, 0, 100)
+    PALETTE[statKey] = PALETTE[statKey] or { hue = 0, saturation = 0 }
+    PALETTE[statKey].saturation = v
+    if reflectSliders and SLIDER_REFS[statKey] then updateSliderHandle(SLIDER_REFS[statKey].saturation, v) end
+end
+
+local function getSnapshot()
+    local snap = {}
+    for _, spec in ipairs(CORE_KEYS) do
+        local k = spec.key
+        local e = PALETTE[k] or { hue = 0, saturation = 0 }
+        snap[k] = { hue = clamp(e.hue, 0, 360), saturation = clamp(e.saturation, 0, 100) }
+    end
+    return snap
+end
+
+local function savePalette(reason)
+    TriggerServerEvent('bcc-corehud:palette:save', getSnapshot(), reason)
+end
+
+local function applyPreset(preset, shouldSave)
+    if type(preset) ~= 'table' then return end
+    for _, spec in ipairs(CORE_KEYS) do
+        local k = spec.key
+        local src = preset[k]
+        if type(src) == 'table' then
+            setHue(k, src.hue or 0, true)
+            setSaturation(k, src.saturation or 0, true)
+        end
+    end
+    sendPaletteToNui()
+    if shouldSave then savePalette('preset') end
+end
+
+-- Called when server pushes saved palette
+RegisterNetEvent('bcc-corehud:palette:apply', function(snapshot)
+    if type(snapshot) == 'table' then
+        for _, spec in ipairs(CORE_KEYS) do
+            local k = spec.key
+            local src = snapshot[k]
+            if type(src) == 'table' then
+                setHue(k, src.hue, true)
+                setSaturation(k, src.saturation, true)
+            end
+        end
+        sendPaletteToNui()
+    end
+end)
+
+-- ---------- live drag watcher ----------
+local function isMenuActive()
+    if not FeatherMenu or not FeatherMenu.activeMenu then return false end
+    -- If you register your menu with Feather, you can also check menuID here.
+    return FeatherMenu.activeMenu ~= nil
+end
+
+local LIVE_WATCHER_RUNNING = false
+local function startLiveWatcher()
+    if LIVE_WATCHER_RUNNING then return end
+    LIVE_WATCHER_RUNNING = true
+    CreateThread(function()
+        while isMenuActive() do
+            local dirty = false
+            if PALETTE_PAGE and PALETTE_PAGE.RegisteredElements then
+                for _, spec in ipairs(CORE_KEYS) do
+                    local k = spec.key
+                    local refs = SLIDER_REFS[k]
+                    if refs then
+                        local hueElem = PALETTE_PAGE.RegisteredElements[refs.hueId]
+                        if hueElem and hueElem.data then
+                            local hv = clamp(numberFromSlider(hueElem.data.value), 0, 360)
+                            if hv ~= PALETTE[k].hue then
+                                setHue(k, hv, false); dirty = true
+                            end
+                        end
+                        local satElem = PALETTE_PAGE.RegisteredElements[refs.satId]
+                        if satElem and satElem.data then
+                            local sv = clamp(numberFromSlider(satElem.data.value), 0, 100)
+                            if sv ~= PALETTE[k].saturation then
+                                setSaturation(k, sv, false); dirty = true
+                            end
+                        end
+                    end
+                end
+            end
+            if dirty then sendPaletteToNui() end
+            Wait(50) -- ~20 fps while dragging feels smooth without being heavy
+        end
+        LIVE_WATCHER_RUNNING = false
+    end)
+end
+
+-- ---------- Menu ----------
+function mainPaleteMenu()
+    local page = BCCCoreHudMenu:RegisterPage('bcc-corehud:palette:page')
+    PALETTE_PAGE = page
+
+    page:RegisterElement('header', { value = 'HUD Palette', slot = 'header' })
+    page:RegisterElement('subheader', { value = 'Adjust the HUD colors', slot = 'header' })
+    page:RegisterElement('line', { slot = 'header' })
+
+    page:RegisterElement('button', { label = 'Toggle HUD Visibility (/togglehud)', slot = 'content' }, function()
+        if type(ToggleUI) == 'function' then ToggleUI() else if type(ExecuteCommand) == 'function' then ExecuteCommand(
+                'togglehud') end end
+    end)
+    page:RegisterElement('button', { label = 'Reopen Palette Menu (/hudpalette)', slot = 'content' }, function()
+        if type(ExecuteCommand) == 'function' then ExecuteCommand('hudpalette') end
+    end)
+    page:RegisterElement('line', { slot = 'content' })
+
+    -- footer actions
+    page:RegisterElement('button', { label = 'Apply Colors', slot = 'footer' }, function()
+        sendPaletteToNui()
+        savePalette('apply_colors')
+    end)
+    page:RegisterElement('button', { label = 'Apply Colorful Preset', slot = 'footer' }, function()
+        applyPreset(COLORFUL_PRESET, true)
+    end)
+    page:RegisterElement('button', { label = 'Reset to White', slot = 'footer' }, function()
+        applyPreset(WHITE_PRESET, true)
+    end)
+
+    -- sliders
+    for _, spec in ipairs(CORE_KEYS) do
+        local k     = spec.key
+        local label = spec.label
+        local entry = PALETTE[k] or { hue = 0, saturation = 0 }
+
+        page:RegisterElement('subheader', { value = label, slot = 'content', style = { ['margin-top'] = '8px' } })
+
+        local hueId = ('bcc-corehud:palette:%s:hue'):format(k)
+        local hueHandle = page:RegisterElement('slider', {
+            id    = hueId,
+            label = 'Hue',
+            slot  = 'content',
+            start = entry.hue,
+            min   = 0,
+            max   = 360,
+            steps = 1
+        }, function(data)
+            -- still handle commit events
+            setHue(k, numberFromSlider(data), false)
+            sendPaletteToNui()
+        end)
+
+        local satId = ('bcc-corehud:palette:%s:saturation'):format(k)
+        local satHandle = page:RegisterElement('slider', {
+            id    = satId,
+            label = 'Saturation',
+            slot  = 'content',
+            start = entry.saturation,
+            min   = 0,
+            max   = 100,
+            steps = 1
+        }, function(data)
+            setSaturation(k, numberFromSlider(data), false)
+            sendPaletteToNui()
+        end)
+
+        SLIDER_REFS[k] = { hueId = hueId, hue = hueHandle, satId = satId, saturation = satHandle }
+        page:RegisterElement('line', { slot = 'content' })
+    end
+
+    BCCCoreHudMenu:Open({ startupPage = page })
+    -- kick off the realtime watcher so colors update during drag
+    startLiveWatcher()
+end

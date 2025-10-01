@@ -16,6 +16,13 @@ const createDefaultCores = () => ({
   hunger: null,
   thirst: null,
   stress: null,
+  messages: null,
+  clean_stats: null,
+  money: null,
+  gold: null,
+  exp: null,
+  tokens: null,
+  logo: null,
   voice: null,
   horse_health: null,
   horse_stamina: null,
@@ -50,6 +57,13 @@ const createDefaultPalette = () => ({
   hunger: { ...DEFAULT_PALETTE_ENTRY },
   thirst: { ...DEFAULT_PALETTE_ENTRY },
   stress: { ...DEFAULT_PALETTE_ENTRY },
+  messages: { ...DEFAULT_PALETTE_ENTRY },
+  clean_stats: { ...DEFAULT_PALETTE_ENTRY },
+  money: { ...DEFAULT_PALETTE_ENTRY },
+  gold: { ...DEFAULT_PALETTE_ENTRY },
+  exp: { ...DEFAULT_PALETTE_ENTRY },
+  tokens: { ...DEFAULT_PALETTE_ENTRY },
+  logo: { ...DEFAULT_PALETTE_ENTRY },
   temperature: { ...DEFAULT_PALETTE_ENTRY },
   temperature_value: { ...DEFAULT_PALETTE_ENTRY },
   horse_health: { ...DEFAULT_PALETTE_ENTRY },
@@ -68,6 +82,14 @@ const SLOT_ORDER = Object.freeze([
   'hunger',
   'thirst',
   'stress',
+  'messages',
+  'clean_stats',
+  'money',
+  'gold',
+  'exp',
+  'tokens',
+  'player_id',
+  'logo',
   'voice',
   'horse_health',
   'horse_stamina',
@@ -82,6 +104,14 @@ const SLOT_LABELS = Object.freeze({
   hunger: 'Hunger',
   thirst: 'Thirst',
   stress: 'Stress',
+  messages: 'Messages',
+  clean_stats: 'Cleanliness',
+  money: 'Money',
+  gold: 'Gold',
+  exp: 'Experience',
+  tokens: 'Tokens',
+  player_id: 'Player ID',
+  logo: 'Logo',
   voice: 'Voice',
   horse_health: 'Horse Health',
   horse_stamina: 'Horse Stamina',
@@ -125,10 +155,13 @@ const fallbackLayout = Object.freeze(createFallbackLayout())
 const layoutPositions = ref({})
 const defaultLayout = ref({})
 const layoutExitPending = ref(false)
+const DEFAULT_SAVE_LABEL = 'Save Layout'
+const saveLayoutLabel = ref(DEFAULT_SAVE_LABEL)
 
 const layoutHasEntries = computed(() => Object.keys(layoutPositions.value).length > 0)
 const useAbsoluteLayout = computed(() => layoutEditing.value || layoutHasEntries.value)
 const draggingType = computed(() => dragState.value?.type ?? null)
+const canSaveLayout = computed(() => layoutEditing.value && layoutDirty.value)
 
 const slotRefs = new Map()
 const setSlotRef = (type, el) => {
@@ -224,6 +257,57 @@ const CORE_MAP = {
     outer: 'outerstress',
     effectInside: 'effect_stress_inside',
     effectNext: 'effect_stress_next'
+  },
+  messages: {
+    inner: 'innermessages',
+    outer: 'outermessages',
+    effectInside: 'effect_messages_inside',
+    effectNext: 'effect_messages_next'
+  },
+  clean_stats: {
+    inner: 'innerclean_stats',
+    outer: 'outerclean_stats',
+    effectInside: 'effect_clean_stats_inside',
+    effectNext: 'effect_clean_stats_next'
+  },
+  money: {
+    inner: 'innermoney',
+    outer: 'outermoney',
+    effectInside: 'effect_money_inside',
+    effectNext: 'effect_money_next'
+  },
+  gold: {
+    inner: 'innergold',
+    outer: 'outergold',
+    effectInside: 'effect_gold_inside',
+    effectNext: 'effect_gold_next'
+  },
+  exp: {
+    inner: 'innerexp',
+    outer: 'outerexp',
+    effectInside: 'effect_exp_inside',
+    effectNext: 'effect_exp_next'
+  },
+  tokens: {
+    inner: 'innertokens',
+    outer: 'outertokens',
+    effectInside: 'effect_tokens_inside',
+    effectNext: 'effect_tokens_next'
+  },
+  player_id: {
+    inner: 'innerplayer_id',
+    outer: 'outerplayer_id',
+    effectInside: 'effect_player_id_inside',
+    effectNext: 'effect_player_id_next'
+  },
+  logo: {
+    inner: 'innerlogo',
+    outer: 'outerlogo',
+    effectInside: 'effect_logo_inside',
+    effectNext: 'effect_logo_next',
+    meta: {
+      logo: 'logo_image'
+    }
   },
   voice: {
     inner: 'innervoice',
@@ -501,53 +585,32 @@ const saveLayoutToServer = async () => {
   }
 }
 
+const handleSaveLayoutClick = async () => {
+  if (!canSaveLayout.value) {
+    return
+  }
+  await saveLayoutToServer()
+  if (!layoutDirty.value) {
+    try {
+      await api.post('setLayoutEditing', { editing: false, skipSave: true })
+    } catch (error) {
+      console.error('[BCC-CoreHUD] Failed to exit layout mode', error)
+    } finally {
+      await toggleLayoutEditing(false)
+    }
+  }
+}
+
 const toggleLayoutEditing = async (enabled) => {
   if (enabled) {
     await ensureLayoutPositionsFromInline()
   } else {
     stopDrag()
     layoutExitPending.value = false
+    saveLayoutLabel.value = DEFAULT_SAVE_LABEL
   }
 
   layoutEditing.value = enabled
-}
-
-const requestLayoutExit = async () => {
-  if (layoutExitPending.value) {
-    return
-  }
-
-  layoutExitPending.value = true
-
-  if (typeof GetParentResourceName === 'undefined') {
-    await toggleLayoutEditing(false)
-    layoutExitPending.value = false
-    return
-  }
-
-  try {
-    await api.post('setLayoutEditing', {
-      editing: false,
-      skipSave: true,
-      reason: 'escape'
-    })
-  } catch (error) {
-    console.error('[BCC-CoreHUD] Failed to request layout exit', error)
-  } finally {
-    layoutExitPending.value = false
-  }
-}
-
-const handleKeydown = (event) => {
-  if (!layoutEditing.value) {
-    return
-  }
-
-  if (event.key === 'Escape' || event.key === 'Esc') {
-    event.preventDefault()
-    event.stopPropagation()
-    requestLayoutExit()
-  }
 }
 
 const handleResize = () => {
@@ -583,6 +646,11 @@ const handleMessage = async (event) => {
       break
 
     case 'layoutEdit':
+      if (typeof data.label === 'string' && data.label.trim() !== '') {
+        saveLayoutLabel.value = data.label
+      } else {
+        saveLayoutLabel.value = DEFAULT_SAVE_LABEL
+      }
       if (typeof data.editing === 'boolean') {
         await toggleLayoutEditing(data.editing)
       }
@@ -624,14 +692,12 @@ onMounted(() => {
   window.addEventListener('message', handleMessage)
   window.addEventListener('blur', stopDrag)
   window.addEventListener('resize', handleResize)
-  window.addEventListener('keydown', handleKeydown)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('message', handleMessage)
   window.removeEventListener('blur', stopDrag)
   window.removeEventListener('resize', handleResize)
-  window.removeEventListener('keydown', handleKeydown)
   stopDrag()
 })
 
@@ -650,6 +716,13 @@ watch(useAbsoluteLayout, (active) => {
     stopDrag()
   }
 })
+
+watch(layoutEditing, async (editing) => {
+  if (!editing && layoutDirty.value) {
+    await saveLayoutToServer()
+  }
+})
+
 </script>
 
 <template>
@@ -663,6 +736,16 @@ watch(useAbsoluteLayout, (active) => {
       class="core-layout-overlay"
       :class="{ 'core-layout-overlay--editing': layoutEditing }"
     >
+      <div v-if="layoutEditing" class="core-layout-toolbar">
+        <button
+          type="button"
+          class="core-layout-save"
+          :disabled="!canSaveLayout"
+          @click="handleSaveLayoutClick"
+        >
+          {{ saveLayoutLabel }}
+        </button>
+      </div>
       <div v-if="layoutEditing" class="core-layout-grid"></div>
       <div
         v-for="type in SLOT_ORDER"
@@ -729,6 +812,39 @@ watch(useAbsoluteLayout, (active) => {
 
 .core-layout-overlay--editing {
   pointer-events: auto;
+}
+
+.core-layout-toolbar {
+  position: absolute;
+  bottom: 6vh;
+  left: 6vw;
+  display: flex;
+  gap: 0.5rem;
+  pointer-events: auto;
+  z-index: 1;
+}
+
+.core-layout-save {
+  pointer-events: auto;
+  border: none;
+  background: rgba(12, 16, 24, 0.78);
+  color: #f9fafb;
+  padding: 0.45rem 0.9rem;
+  border-radius: 0.5rem;
+  font-size: 0.9rem;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background-color 0.18s ease, transform 0.18s ease;
+}
+
+.core-layout-save:hover:not(:disabled) {
+  background: rgba(37, 99, 235, 0.9);
+  transform: translateY(-1px);
+}
+
+.core-layout-save:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .core-layout-grid {
