@@ -1,7 +1,7 @@
 Config                                = {}
 
 -- Locale key used by locale.lua (must exist in Locales table)
-Config.defaultlang                    = 'ro_lang'
+Config.defaultlang                    = 'en_lang'
 
 -- Client HUD behaviour
 Config.AutoShowHud                    = true  -- Set to false to require manual /togglehud on spawn
@@ -74,7 +74,7 @@ Config.EnableTokensCore               = true      -- Displays tokens or premium 
 
 -- Logo / watermark indicator
 Config.EnableLogoCore                 = true     -- Set true to show a draggable logo slot
-Config.LogoImage                      = 'https://hoinarii.ro/assets/img/logo.png'        -- Path/URL served by NUI for the logo image
+Config.LogoImage                      = ''        -- Path/URL served by NUI for the logo image
 
 -- Database persistence (requires oxmysql)
 Config.SaveToDatabase                 = true  -- Disable if you do not want to store core snapshots server-side
