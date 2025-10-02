@@ -5,9 +5,9 @@ if exports and exports.vorp_core and exports.vorp_core.GetCore then
     Core = exports.vorp_core:GetCore()
 end
 
-local saveEnabled = Config.SaveToDatabase ~= false
-local debugEnabled = Config.Debug == true
-local tableName = Config.DatabaseTable or 'bcc_corehud'
+local saveEnabled = true
+local debugEnabled = Config.devMode == true
+local tableName = 'bcc_corehud'
 
 local defaultNeedValue = tonumber(Config.InitialNeedValue) or 100.0
 if defaultNeedValue < 0.0 then defaultNeedValue = 0.0 end
@@ -1036,10 +1036,6 @@ local function applyNeedModifiers(src, modifiers)
 end
 
 local function registerNeedItems()
-    if Config.RegisterNeedItems ~= true then
-        return
-    end
-
     if not exports or not exports.vorp_inventory then
         print('^3[BCC-CoreHUD]^0 vorp_inventory export missing; skipping need item registration')
         return
@@ -1055,9 +1051,7 @@ local function registerNeedItems()
         if type(itemName) == 'string' and itemName ~= '' then
             exports.vorp_inventory:registerUsableItem(itemName, function(data)
                 local src = data.source
-                if entry.closeInventory ~= false then
-                    exports.vorp_inventory:closeInventory(src)
-                end
+                exports.vorp_inventory:closeInventory(src)
 
                 if entry.remove ~= false then
                     if data.item and data.item.id then
@@ -1075,6 +1069,19 @@ local function registerNeedItems()
                 end
 
                 applyNeedModifiers(src, entry)
+
+                TriggerClientEvent('bcc-corehud:playConsumeAnim', src, {
+                    prop = entry.prop,
+                    animation = entry.animation or entry.anim,
+                    duration = entry.duration
+                })
+
+                local staminaValue = tonumber(entry.stamina)
+                if staminaValue then
+                    if staminaValue < 0 then staminaValue = 0 end
+                    if staminaValue > 100 then staminaValue = 100 end
+                    TriggerClientEvent('bcc-corehud:setStaminaCore', src, staminaValue)
+                end
             end)
         end
     end
@@ -1139,3 +1146,6 @@ BccUtils.RPC:Register('bcc-corehud:getBalances', function(params, cb, src)
 
     cb({ ok = true, data = data })
 end)
+
+-- Check for version updates
+BccUtils.Versioner.checkFile(GetCurrentResourceName(), "https://github.com/BryceCanyonCounty/bcc-corehud")

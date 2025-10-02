@@ -1,0 +1,9 @@
+<1.4.0>
+- **Prop-driven eat/drink animations** for consumables (server & client plumbing).
+- **Cleanliness percentage mapping fixed** and dirt-fly effects now trigger correctly.
+- **Localized toast** displayed when cycling **voice proximity**.
+- **All chat commands configurable** (or disable-able) via `config.lua`.
+- **Version file** introduced for the resource.
+- **Inventory auto-closes** after using a need item (removed per-item toggle).
+- **Always register need items** (removed `Config.RegisterNeedItems`).
+- **Misc cleanups:** persistence always targets `bcc_corehud`, server debug respects `Config.devMode`, docs updated.

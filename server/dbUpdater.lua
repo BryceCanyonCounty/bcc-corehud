@@ -7,7 +7,7 @@ CreateThread(function()
     end
 
     -- Create the bcc_corehud table if it doesn't exist
-    local tableName = Config.DatabaseTable or 'bcc_corehud'
+    local tableName = 'bcc_corehud'
 
     MySQL.query.await(([[
         CREATE TABLE IF NOT EXISTS `%s` (

@@ -298,12 +298,22 @@ function mainPaleteMenu()
     page:RegisterElement('subheader', { value = 'Adjust the HUD colors', slot = 'header' })
     page:RegisterElement('line', { slot = 'header' })
 
-    page:RegisterElement('button', { label = 'Toggle HUD Visibility (/togglehud)', slot = 'content' }, function()
-        if type(ToggleUI) == 'function' then ToggleUI() else if type(ExecuteCommand) == 'function' then ExecuteCommand(
-                'togglehud') end end
+    local toggleCmd = Config.CommandToggleHud
+    local toggleLabel = toggleCmd and ('Toggle HUD Visibility (/%s)'):format(toggleCmd) or 'Toggle HUD Visibility'
+    page:RegisterElement('button', { label = toggleLabel, slot = 'content' }, function()
+        if type(ToggleUI) == 'function' then
+            ToggleUI()
+        elseif toggleCmd and type(ExecuteCommand) == 'function' then
+            ExecuteCommand(toggleCmd)
+        end
     end)
-    page:RegisterElement('button', { label = 'Reopen Palette Menu (/hudpalette)', slot = 'content' }, function()
-        if type(ExecuteCommand) == 'function' then ExecuteCommand('hudpalette') end
+
+    local paletteCmd = Config.CommandPalette
+    local paletteLabel = paletteCmd and ('Reopen Palette Menu (/%s)'):format(paletteCmd) or 'Reopen Palette Menu'
+    page:RegisterElement('button', { label = paletteLabel, slot = 'content' }, function()
+        if paletteCmd and type(ExecuteCommand) == 'function' then
+            ExecuteCommand(paletteCmd)
+        end
     end)
     page:RegisterElement('line', { slot = 'content' })
 

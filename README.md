@@ -45,16 +45,20 @@ An opinionated RedM HUD for player, mount, voice and environment telemetry with 
    ```
 4. Restart the server or run `refresh` followed by `ensure bcc-corehud` from the console.
 
-On first start the `server/dbUpdater.lua` script creates (or upgrades) the `bcc_corehud` table using the name defined in `Config.DatabaseTable`.
+On first start the `server/dbUpdater.lua` script creates (or upgrades) the `bcc_corehud` table automatically.
 
 ## Commands & Shortcuts
 
-| Command / key | Description |
-|---------------|-------------|
-| `/togglehud` | Toggle the HUD visibility for the current client. |
-| `/hudlayout` | Enter/exit layout edit mode. Use `/hudlayout reset` to clear saved positions. |
-| `/hudpalette` | Open the palette editor when `PaletteMenu` is available. |
-| `Esc` (while editing) | Exit layout mode instantly without saving. |
+All chat commands are configurable via the `Config.Command*` entries (set a value to `false`/`nil` to disable it entirely).
+
+| Command (default) | Config key | Description |
+|-------------------|------------|-------------|
+| `/togglehud` | `Config.CommandToggleHud` | Toggle the HUD visibility for the current client. |
+| `/hudlayout` | `Config.CommandLayout` | Enter/exit layout edit mode. Use `/hudlayout reset` to clear saved positions. |
+| `/hudpalette` | `Config.CommandPalette` | Open the palette editor when `PaletteMenu` is available. |
+| `/clearfx` | `Config.CommandClearFx` | Stop all active post-processing FX (e.g. from temperature or cleanliness penalties). |
+| `/hudheal` | `Config.CommandHeal` | Instantly refill hunger, thirst, stress, and cleanliness. |
+| `Esc` (while editing) | – | Exit layout mode instantly without saving. |
 
 ### Layout Editor Basics
 
@@ -71,7 +75,7 @@ All options live in `config.lua`. The table below highlights the most relevant g
 
 | Option | Default | Notes |
 |--------|---------|-------|
-| `Config.AutoShowHud` | `false` | Auto-toggle HUD on spawn. If `false`, players must run `/togglehud`. |
+| `Config.AutoShowHud` | `false` | Auto-toggle HUD on spawn. If `false`, players must run the toggle command (default `/togglehud`). |
 | `Config.UpdateInterval` | `5000` ms | Frequency of HUD snapshots sent to the UI. |
 | `Config.LowCoreWarning` | `25.0` | Percent threshold that triggers the “wounded/drained/starving/parched/stressed” labels. |
 | `Config.Debug` | `true` | Enables verbose client logging. |
@@ -114,13 +118,11 @@ All options live in `config.lua`. The table below highlights the most relevant g
 
 | Option | Default | Notes |
 |--------|---------|-------|
-| `Config.SaveToDatabase` | `true` | Disable to keep layouts/palettes client-side only. |
 | `Config.SaveInterval` | `15000` ms | Minimum delay between stored snapshots per character. |
-| `Config.DatabaseTable` | `'bcc_corehud'` | Override the table name if required. |
 
 ### Consumable Registration
 
-Setting `Config.RegisterNeedItems = true` will register each entry in `Config.NeedItems` with `vorp_inventory`, automatically applying hunger/thirst/stress adjustments when those items are used. This is optional but helps tie the HUD into your broader economy.
+Entries in `Config.NeedItems` are automatically registered with `vorp_inventory`, so hunger/thirst/stress adjustments (and any configured animations) apply whenever those items are used.
 
 ## Integration API
 
