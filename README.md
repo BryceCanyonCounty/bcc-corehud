@@ -1,176 +1,154 @@
 # BCC Core HUD
 
-An opinionated RedM HUD for player, mount, voice and environment telemetry with a Vue 3 / Tailwind front end. The resource ships with persistence, an in-game layout editor, optional auto-needs decay, and a minimal API for other scripts to feed hunger, thirst or stress data.
+An opinionated RedM HUD for player, mount, voice, temperature and cleanliness telemetry with a Vue 3/Tailwind SPA front end. The resource includes layout and palette editors, oxmysql persistence, additive core buffs, consumable helpers and optional auto-decay for hunger/thirst.
 
-## Feature Overview
+> **Quick start:** drop the resource in `resources/[BCC]/bcc-corehud`, ensure `oxmysql` and (optionally) `vorp_core` + `vorp_inventory`, then `ensure bcc-corehud`.
 
-- **Player cores** – Health and stamina inner/outer rings with low-core warning badges and configurable damage when starving or dehydrated.
-- **Needs tracking** – Hunger, thirst and stress rings that can be driven by another resource (via export) or by the built-in auto-decay logic.
-- **Voice indicator** – Microphone core that shows when the player is talking and fades range intensity based on Mumble proximity.
-- **Mount telemetry** – Horse health, stamina and a dedicated dirtiness badge that lights up when the configured attribute threshold is reached.
-- **Environment awareness** – Hot and cold icons appear only while the player is overheating or freezing, with a separate degree core for quick reference.
-- **Layout & palette editor** – Drag-and-drop every core, align with the overlay grid, escape with `Esc`, and optionally tweak colours through the palette menu. Positions and palettes are stored per character.
-- **Persistence with migration support** – Uses oxmysql to snapshot cores, palettes and layouts. The bundled migration script keeps the table up to date.
-- **Vue 3 single page UI** – Built with Vite for fast local development and tiny production bundles.
-- **Consumable registration helper** – Optionally auto-register food/drink items with `vorp_inventory`, making it easy to connect your item shop to the needs system.
+## Highlights
+
+- **Complete core suite** – Health, stamina, hunger, thirst, stress, temperature, money, gold, experience, tokens and horse telemetry, each with configurable warning thresholds.
+- **Needs & buffs** – Built-in auto-decay or external data via exports. Consumables can push additive health/stamina boosts and golden core overpower using the RedM helpers.
+- **Voice awareness** – Mumble proximity visualiser plus talking indicator, configurable labels and keybind cycling.
+- **Cleanliness feedback** – Horse dirt badge and player cleanliness core with optional flies FX, cooldown-based warnings and starvation/penalty hooks.
+- **Palette & layout editor** – Drag, drop and recolour every widget in-game; snapshots persist per character through oxmysql.
+- **Modular consumable config** – Need item definitions live in `shared/config/needitems/*.lua`; add or remove packs without touching core config.
+- **Robust persistence** – Character layouts, palettes, needs and balances survive restarts. Automatic DB bootstrap via `server/dbUpdater.lua`.
+- **Vue 3 SPA** – Vite-powered UI with hot reload for rapid iteration.
 
 ## Requirements
 
 | Dependency | Purpose |
 |------------|---------|
-| [RedM](https://redm.net/) (cerulean FXServer) | Target runtime |
-| [oxmysql](https://github.com/overextended/oxmysql) | Database persistence (enabled by default) |
-| [VORP Core](https://github.com/VORPCORE/vorp-core) | Character resolution & optional needs data (recommended) |
-| [feather-menu](https://github.com/feather-framework/feather-menu) | Provides the in-game palette menu (optional but supported) |
-| [vorp_inventory](https://github.com/VORPCORE/vorp_inventory) | Needed when using the consumable auto-registration helper |
-| Node.js 18+ & Yarn 1.22+ | Building the NUI bundle (already compiled in releases, required for local changes) |
-
-> The HUD can run without an external needs resource. When `Config.NeedsResourceName` is `false`, the client applies local hunger/thirst decay using the timings in `config.lua`.
+| [RedM (cerulean FXServer)](https://redm.net/) | Runtime |
+| [oxmysql](https://github.com/overextended/oxmysql) | Layout/palette/needs persistence |
+| [VORP Core](https://github.com/VORPCORE/vorp-core) *(recommended)* | Character resolution & balance sync |
+| [vorp_inventory](https://github.com/VORPCORE/vorp_inventory) *(optional)* | Automatic consumable registration |
+| [feather-menu](https://github.com/feather-framework/feather-menu) *(optional)* | Palette editor UI |
+| Node.js 18+ & Yarn 1.22+ *(optional)* | Building the NUI bundle when customising |
 
 ## Installation
 
-1. Place the `bcc-corehud` folder inside your server `resources` directory (keeping the `[BCC]` wrapper is fine).
-2. If you plan to customise the UI, install dependencies and build the bundle:
+1. Copy the repository into your server resources (keep the `[BCC]` folder if you like).
+2. (Optional) Build the UI when making changes:
    ```bash
    cd resources/[BCC]/bcc-corehud/ui
    yarn install
    yarn build
    ```
-   (The repository ships with a compiled `ui/dist`, so this step is optional for plug-and-play installs.)
-3. Ensure the resource after your database and core dependencies in `server.cfg`:
+3. Ensure dependencies before the HUD in `server.cfg`:
    ```cfg
    ensure oxmysql
-   ensure vorp_core
+   ensure vorp_core      # optional but recommended
    ensure bcc-corehud
    ```
-4. Restart the server or run `refresh` followed by `ensure bcc-corehud` from the console.
+4. Restart the server (`refresh` + `ensure bcc-corehud` works too). The database table is created automatically on first run.
 
-On first start the `server/dbUpdater.lua` script creates (or upgrades) the `bcc_corehud` table automatically.
+## Configuration Overview
 
-## Commands & Shortcuts
+- Global options live in `shared/config/config.lua`.
+- Need item definitions are split into category files under `shared/config/needitems/` (`foods.lua`, `drinks.lua`, `medical.lua`, `smokes.lua`, `drugs.lua`). Each file calls `AddNeedItems(items)` so new packs can be dropped in without editing the main config.
+- Per-item fields:
+  - `thirst`, `hunger`, `stress` – percents added to the current core values.
+  - `health`, `stamina` – additive core boosts (0 ignores, positive values clamp to 100).
+  - `OuterCore*/InnerCore*Gold` – durations for `EnableAttributeOverpower` (0 to ignore).
+  - `prop`, `animation`, `duration` – visuals for the consume animation helper.
+- Cleanliness and temperature sections expose damage, FX and warning toggles. Setting `Config.MinCleanliness` or temperature thresholds to `false` disables those features.
+- Commands (`Config.CommandToggleHud`, `Config.CommandLayout`, `Config.CommandPalette`, etc.) can be reassigned or disabled (`false`).
 
-All chat commands are configurable via the `Config.Command*` entries (set a value to `false`/`nil` to disable it entirely).
+### Sample: Adding a new consumable pack
 
-| Command (default) | Config key | Description |
-|-------------------|------------|-------------|
-| `/togglehud` | `Config.CommandToggleHud` | Toggle the HUD visibility for the current client. |
-| `/hudlayout` | `Config.CommandLayout` | Enter/exit layout edit mode. Use `/hudlayout reset` to clear saved positions. |
-| `/hudpalette` | `Config.CommandPalette` | Open the palette editor when `PaletteMenu` is available. |
-| `/clearfx` | `Config.CommandClearFx` | Stop all active post-processing FX (e.g. from temperature or cleanliness penalties). |
-| `/hudheal` | `Config.CommandHeal` | Instantly refill hunger, thirst, stress, and cleanliness. |
-| `Esc` (while editing) | – | Exit layout mode instantly without saving. |
+```lua
+-- shared/config/needitems/coffee.lua
+local items = {
+    { item = 'flatwhite', thirst = 12, hunger = 0, stress = -5, health = 0, stamina = 5, OuterCoreHealthGold = 0, InnerCoreHealthGold = 0, OuterCoreStaminaGold = 0, InnerCoreStaminaGold = 0, remove = true, prop = 'P_MUGCOFFEE01X', animation = 'drink', duration = 3500 },
+}
 
-### Layout Editor Basics
+AddNeedItems(items)
+```
 
-1. Run `/hudlayout` – a grid overlay will appear and the cores become draggable.
-2. Drag each core into position (default placement is a vertical stack bottom-left).
-3. Press `Esc` or rerun `/hudlayout` to exit. Positions persist per character; you can reset from the same command.
-4. When editing, stub icons appear for cores you do not currently have data for (temperature, horse stats, etc.).
+Add the new file to `shared/config/needitems/`, and the manifest will load it automatically.
 
-## Configuration
+## In-Game Tools
 
-All options live in `config.lua`. The table below highlights the most relevant groups—see the file for inline comments and defaults.
+| Command | Default | Description |
+|---------|---------|-------------|
+| `/togglehud` | `Config.CommandToggleHud` | Toggle HUD visibility. |
+| `/hudlayout` | `Config.CommandLayout` | Enter/exit drag-and-drop layout mode (`Esc` cancels). |
+| `/hudpalette` | `Config.CommandPalette` | Open the palette editor when feather-menu is present. |
+| `/clearfx` | `Config.CommandClearFx` | Stop active post-processing effects. |
+| `/hudheal` | `Config.CommandHeal` | Refill hunger/thirst/stress/cleanliness (dev tool).
 
-### HUD Behaviour
+### Palette editor
 
-| Option | Default | Notes |
-|--------|---------|-------|
-| `Config.AutoShowHud` | `false` | Auto-toggle HUD on spawn. If `false`, players must run the toggle command (default `/togglehud`). |
-| `Config.UpdateInterval` | `5000` ms | Frequency of HUD snapshots sent to the UI. |
-| `Config.LowCoreWarning` | `25.0` | Percent threshold that triggers the “wounded/drained/starving/parched/stressed” labels. |
-| `Config.Debug` | `true` | Enables verbose client logging. |
-| `Config.HorseDirtyThreshold` | `4` | Attribute rank (0–10) that enables the dirty horse badge. Set to `false` to disable the core. |
-| `Config.EnableVoiceCore` | `true` | Toggle the voice proximity core entirely. |
-| `Config.VoiceMaxRange` | `12.0` m | Max Mumble range used to normalise the voice ring fill. |
+1. `/hudpalette` to open the menu.
+2. Tweak sliders; changes preview instantly.
+3. Hit save (or `Esc`) to persist per character. Server-side validation stores every colour key.
 
-### Needs & Decay
+### Layout editor
 
-| Option | Default | Notes |
-|--------|---------|-------|
-| `Config.NeedsResourceName` | `false` | Name of a resource exposing `GetNeedsData()`. When provided, the HUD polls it instead of using local decay. |
-| `Config.NeedsAutoDecay` | `true` | Master toggle for built-in hunger/thirst decay when no external resource is configured. |
-| `Config.NeedsDecayStartDelay` | `300.0` sec | Grace period after eating/drinking before decay resumes. |
-| `Config.HungerRate` | `0.10` %/sec | Percent-per-second hunger decay applied once the grace delay expires. |
-| `Config.MountedHungerRate` | `0.10` %/sec | Hunger decay applied while riding a mount. |
-| `Config.ThirstRate` | `0.15` %/sec | Percent-per-second thirst decay applied once the grace delay expires. |
-| `Config.MountedThirstRate` | `0.15` %/sec | Thirst decay applied while riding a mount. |
-| `Config.ActivityMultipliers` | table | Per-activity hunger/thirst modifiers used while idle/walking/running/sprinting/coasting/swimming. |
-| `Config.StarvationDamageDelay` | `120.0` sec | Delay after both hunger and thirst hit zero before health damage starts. |
-| `Config.StarvationDamageInterval` | `10.0` sec | Interval between starvation ticks. |
-| `Config.StarvationDamageAmount` | `4.0` HP | Damage applied each tick once starving begins. |
+1. `/hudlayout` enables grid + drag handles.
+2. Move components, `/hudlayout` again (or `Esc`) to save/exit.
+3. `/hudlayout reset` clears saved positions for the current character.
 
-### Temperature & Damage
+## Integrations & Events
 
-| Option | Default | Notes |
-|--------|---------|-------|
-| `Config.TemperatureColdThreshold` | `-3.0` °C | World temperature that triggers the cold icon. Set to `false` to disable. |
-| `Config.TemperatureHotThreshold` | `26.0` °C | Threshold for the hot icon. |
-| `Config.AlwaysShowTemperature` | `true` | Keeps the degree core active even without a temperature effect; the hot/cold icon still appears only during extremes. |
-| `Config.TemperatureMin` / `Max` | `-15.0` / `40.0` | Range mapped to the temperature meter used for the degree core. |
-| `Config.MinTemp` / `Config.MaxTemp` | `-5.0` / `31.0` °C | Safe temperature band; outside it you take damage and (if hot) lose thirst. |
-| `Config.RemoveHealth` | `5` HP | Health removed per HUD tick while in unsafe temperatures. |
-| `Config.HotTempThirstDrain` | `1.5` % | Additional thirst removed per HUD tick while above `Config.MaxTemp`. |
-| `Config.TempWarningMessage` | text | Message pushed when overheating (set empty to disable). |
-| `Config.TempWarningCooldown` | `10.0` sec | Delay before the overheat warning can show again. |
-| `Config.DoHealthDamageFx` / `Config.DoHealthPainSound` | `true` / `true` | Toggle the optional FX & audio for temperature damage. |
-
-### Persistence & Database
-
-| Option | Default | Notes |
-|--------|---------|-------|
-| `Config.SaveInterval` | `15000` ms | Minimum delay between stored snapshots per character. |
-
-### Consumable Registration
-
-Entries in `Config.NeedItems` are automatically registered with `vorp_inventory`, so hunger/thirst/stress adjustments (and any configured animations) apply whenever those items are used.
-
-## Integration API
-
-### Client Exports
+### Client exports
 
 ```lua
 -- Apply multiple needs at once
-exports['bcc-corehud']:SetNeeds({ hunger = 80, thirst = 55, stress = 10 })
+exports['bcc-corehud']:SetNeeds({ hunger = 75, thirst = 60, stress = 20 })
 
--- Update a single stat (hunger / thirst / stress)
-exports['bcc-corehud']:SetNeed('hunger', 45)
+-- Adjust a single stat (hunger / thirst / stress)
+exports['bcc-corehud']:SetNeed('hunger', 42)
+
+-- Increment a stat (hunger / thirst / stress / clean_stats)
+exports['bcc-corehud']:AddNeed('clean_stats', -10)
 ```
 
-### Client Events
+### Client events
 
-| Event | Parameters | Purpose |
-|-------|------------|---------|
-| `bcc-corehud:setNeeds` | `(table payload)` | Apply hunger/thirst/stress percentages remotely. |
-| `bcc-corehud:setNeed` | `(string stat, number value)` | Adjust a single need. |
-| `hud:client:changeValue` | `(string stat, number value)` | Legacy alias used by several frameworks. |
+| Event | Payload | Purpose |
+|-------|---------|---------|
+| `bcc-corehud:setNeeds` | `{ hunger, thirst, stress }` | Replace current need state. |
+| `bcc-corehud:setNeed` | `(stat, value)` | Update a single need value. |
+| `bcc-corehud:setStaminaCore` | `amount` | Additive stamina core boost (ignored when ≤ 0). |
+| `bcc-corehud:setHealthCore` | `amount` | Additive health core boost (ignored when ≤ 0). |
+| `bcc-corehud:applyAttributeOverpower` | `{ { attribute, amount }, ... }` | Apply golden core overpower buffs. |
+| `bcc-corehud:playConsumeAnim` | `table` | Trigger configured consume animation/prop. |
 
-### Server Utilities
+### Server helpers
 
-| Event | Purpose |
-|-------|---------|
-| `bcc-corehud:layout:request / save / reset` | Sync layout positions per character. |
-| `bcc-corehud:palette:request / save` | Sync palette data. |
-| `bcc-corehud:saveCores` | Internal event used for persistence.
+| Event/Export | Purpose |
+|--------------|---------|
+| `TriggerClientEvent('bcc-corehud:layout:apply', src, positions)` | Push layout positions to a client. |
+| `TriggerClientEvent('bcc-corehud:palette:apply', src, snapshot)` | Push palette snapshot. |
+| `exports['bcc-corehud']:SetPlayerNeed(target, stat, value)` | Set a single need on the server (persists). |
+| `exports['bcc-corehud']:AddPlayerNeed(target, stat, delta)` | Adjust a need delta on the server. |
 
-You can also push layouts or needs from the server with `TriggerClientEvent('bcc-corehud:layout:apply', src, positions)` or `TriggerClientEvent('bcc-corehud:setNeeds', src, payload)`.
+## Development workflow
 
-## Development Workflow
+1. `ensure bcc-corehud` on your dev server.
+2. Run `yarn dev` inside `ui/` for hot reload during UI changes.
+3. `yarn build` to produce production assets, then restart the resource.
 
-1. Start the resource in RedM.
-2. From `ui/`, run `yarn dev` – Vite will serve the SPA with hot module reload.
-3. Once satisfied, build production assets using `yarn build` and restart the resource.
-
-Linting (optional):
+Lint the UI (optional):
 
 ```bash
 yarn lint
 ```
 
+## Notable Implementation Details
+
+- Cleanliness warnings initialise lazily and only fire once you actually dip below `Config.MinCleanliness`, preventing notification spam on resource restarts.
+- Particle FX attach using `StartNetworkedParticleFxLoopedOnEntityBone` with named asset helpers and `IsPedMale` for bone selection.
+- Consumable buffs treat `health`/`stamina` as additive deltas; zero values leave cores untouched while positive values clamp to `[0, 100]`.
+- Palette persistence accepts any key the UI sends, so custom themes survive reloads.
+- Need item files use `AddNeedItems` to register themselves; you can register additional bundles from other resources before or after loading `bcc-corehud`.
 
 ## Credits & License
 
-- Built by **BCC Scripts** for the RedM servers.
-- HUD UI authored with Vue 3, Pinia and Tailwind CSS.
-- See `LICENSE.md` for usage terms.
+- Crafted by **BCC Scripts** (https://bcc-scripts.com).
+- Vue 3, Pinia, Tailwind CSS, Vite power the web UI.
+- Licensed under the terms in `LICENSE.md`.
 
-Enjoy the HUD! Contributions and pull requests are welcome.
+Pull requests and issue reports are welcome. Enjoy the HUD!
