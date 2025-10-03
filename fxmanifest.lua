@@ -9,9 +9,10 @@ author 'BCC Scripts'
 description 'Redm, NUI, Vuejs boilerplate'
 
 shared_scripts {
-   'config.lua',
-   'locale.lua',
-   'languages/*.lua',
+   'shared/config/config.lua',
+   'shared/locale.lua',
+   'shared/languages/*.lua',
+   'shared/config/needitems/*.lua',
 }
 
 client_scripts {
@@ -28,12 +29,12 @@ server_script {
 }
 
 ui_page {
-    "ui/index.html"
+    "ui/dist/index.html"
 }
 
 files {
-    "ui/index.html",
-    "ui/**/*"
+    "ui/dist/index.html",
+    "ui/dist/**/*"
 }
 
 version '1.4.0'

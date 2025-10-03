@@ -39,23 +39,12 @@ local lastCoreDebug        = {}
 local function getAttributeBaseRankSafe(ped, attributeIndex)
 	if ped == nil or ped == 0 then return 0 end
 	if attributeIndex == nil then return 0 end
-	local ok, value = pcall(GetAttributeBaseRank, ped, attributeIndex)
-	if ok then
-		local n = tonumber(value)
-		if n then return n end
-	elseif Config.devMode then
+	local value = GetAttributeBaseRank(ped, attributeIndex)
+	local n = tonumber(value)
+	if n then return n end
+	if Config.devMode then
 		devPrint('GetAttributeBaseRank failed', value)
 	end
-
-	local okNative, fallback = pcall(Citizen.InvokeNative, 0x147149F2E909323C, ped, attributeIndex,
-		Citizen.ResultAsInteger())
-	if okNative then
-		local n = tonumber(fallback)
-		if n then return n end
-	elseif Config.devMode then
-		devPrint('InvokeNative GetAttributeBaseRank fallback failed', fallback)
-	end
-
 	return 0
 end
 
@@ -173,10 +162,8 @@ local tempFxActive = false
 local function convertCleanlinessRankToPercent(rank)
 	local value = tonumber(rank)
 	if value == nil then return nil end
-	if value <= 0 then
-		return 100.0
-	end
-	return clamp(value, 0.0, 100.0)
+	value = clamp(value, 0.0, 100.0)
+	return clamp(100.0 - value, 0.0, 100.0)
 end
 
 local consumeAnimations = {
@@ -363,27 +350,53 @@ local cleanlinessFxRequested = false
 local cleanlinessFxActive = false
 local lastCleanlinessPenaltyAt = 0
 local lastCleanlinessWarningAt = 0
+local cleanlinessWarningInitialized = false
+local cleanlinessWasBelowThreshold = false
 
 local function maybeNotifyCleanliness(percent, opts)
 	if not Config.EnableCleanStatsCore or not Config.MinCleanliness then return end
-	if percent == nil or percent >= Config.MinCleanliness then return end
+
+	local force = type(opts) == 'table' and opts.force == true
+
+	if percent == nil then
+		cleanlinessWarningInitialized = false
+		cleanlinessWasBelowThreshold = false
+		return
+	end
+
+	if percent >= Config.MinCleanliness then
+		cleanlinessWasBelowThreshold = false
+		cleanlinessWarningInitialized = true
+		return
+	end
+
+	if not cleanlinessWarningInitialized then
+		cleanlinessWarningInitialized = true
+		cleanlinessWasBelowThreshold = true
+		if not force then
+			return
+		end
+	elseif not force and cleanlinessWasBelowThreshold then
+		return
+	end
+
 	local message = _U('hud_clean_warning')
 	if type(message) ~= 'string' or message == '' then return end
 
-	local force = type(opts) == 'table' and opts.force == true
 	local intervalMs = math.max(0.0, (tonumber(Config.CleanWarningInterval) or 0.0) * 1000.0)
 	local now = GetGameTimer()
 	if not force and intervalMs > 0 and (now - lastCleanlinessWarningAt) < intervalMs then
 		return
 	end
 
+	cleanlinessWasBelowThreshold = true
 	lastCleanlinessWarningAt = now
 	Notify(message, 'warning')
 end
 
 local function stopCleanlinessFlies()
-	if cleanlinessFxHandle and Citizen.InvokeNative(0x9DD5AFF561E88F2A, cleanlinessFxHandle) then
-		Citizen.InvokeNative(0x459598F579C98929, cleanlinessFxHandle, false)
+	if cleanlinessFxHandle and DoesParticleFxLoopedExist(cleanlinessFxHandle) then
+		StopParticleFxLooped(cleanlinessFxHandle, false)
 	end
 	cleanlinessFxHandle = nil
 	cleanlinessFxActive = false
@@ -415,38 +428,30 @@ local function updateCleanlinessFlies(cleanPercent)
 	maybeNotifyCleanliness(cleanPercent)
 
 	if cleanlinessFxActive then
-		if cleanlinessFxHandle and not Citizen.InvokeNative(0x9DD5AFF561E88F2A, cleanlinessFxHandle) then
+		if cleanlinessFxHandle and not DoesParticleFxLoopedExist(cleanlinessFxHandle) then
 			stopCleanlinessFlies()
 		end
 		return
 	end
 
 	local dictHash = GetHashKey(CLEANLINESS_FLIES.dict)
-	if not Citizen.InvokeNative(0x65BB72F29138F5D6, dictHash) then
+	if not HasNamedPtfxAssetLoaded(dictHash) then
 		if not cleanlinessFxRequested then
-			Citizen.InvokeNative(0xF2B2353BBC0D4E8F, dictHash)
+			RequestNamedPtfxAsset(dictHash)
 			cleanlinessFxRequested = true
 		end
 		return
 	end
 	cleanlinessFxRequested = false
-	Citizen.InvokeNative(0xA10DB07FC234DD12, CLEANLINESS_FLIES.dict)
+	UseParticleFxAsset(CLEANLINESS_FLIES.dict)
 
 	local ped = PlayerPedId()
 	if ped == 0 then return end
 
-	local pedIsMale = true
-	local okGender, genderResult = pcall(IsPedMale, ped)
-	if okGender then
-		pedIsMale = genderResult and true or false
-	else
-		local okNative, genderNative = pcall(Citizen.InvokeNative, 0x6D9F5FAA7488BA46, ped)
-		if okNative then pedIsMale = genderNative and true or false end
-	end
+	local pedIsMale = IsPedMale(ped) == true
 	local boneIndex = pedIsMale and CLEANLINESS_FLIES.boneMale or CLEANLINESS_FLIES.boneFemale
 
-	cleanlinessFxHandle = Citizen.InvokeNative(
-		0x9C56621462FFE7A6,
+	cleanlinessFxHandle = StartNetworkedParticleFxLoopedOnEntityBone(
 		CLEANLINESS_FLIES.name,
 		ped,
 		CLEANLINESS_FLIES.offset.x,
@@ -487,7 +492,7 @@ local function applyCleanlinessPenalty(percent, opts)
 		updateCleanlinessFlies(percent)
 	end
 	if Config.DoHealthPainSound then
-		pcall(PlayPain, ped, 9, 1, true, true)
+		PlayPain(ped, 9, 1, true, true)
 	end
 	local damage = tonumber(Config.RemoveHealth) or 0
 	if damage <= 0 then return end
@@ -525,7 +530,7 @@ local function applySimpleTemperatureDamage(ped, temperature)
 		return above, below
 	end
 
-	if tempPainSoundEnabled then pcall(PlayPain, ped, 9, 1, true, true) end
+	if tempPainSoundEnabled then PlayPain(ped, 9, 1, true, true) end
 	local newHealth = math.max(0, math.floor(health - damage))
 	if newHealth < health then SetEntityHealth(ped, newHealth) end
 
@@ -634,12 +639,37 @@ local function prettyNumber(n)
 	if math.abs(n % 1) > 0.001 then
 		decimals = 2
 	end
-	local fmt = decimals > 0 and ('%.' .. decimals .. 'f') or '%.0f'
-	local s = string.format(fmt, n)
-	local sign, digits, fraction = s:match('^(-?)(%d+)(%.%d+)?$')
-	if not digits then return s end
-	digits = digits:reverse():gsub('(%d%d%d)', '%1,'):reverse():gsub('^,', '')
-	return (sign or '') .. digits .. (fraction or '')
+	local multiplier = 10 ^ decimals
+	local rounded
+	if decimals > 0 then
+		if n >= 0 then
+			rounded = math.floor(n * multiplier + 0.5) / multiplier
+		else
+			rounded = math.ceil(n * multiplier - 0.5) / multiplier
+		end
+	else
+		rounded = (n >= 0) and math.floor(n + 0.5) or math.ceil(n - 0.5)
+	end
+
+	local sign = ''
+	if rounded < 0 then
+		sign = '-'
+		rounded = -rounded
+	end
+
+	local integerPart = math.floor(rounded)
+	local fraction = ''
+	if decimals > 0 then
+		local fractionValue = math.floor((rounded - integerPart) * multiplier + 0.5)
+		local fractionDigits = tostring(fractionValue)
+		if #fractionDigits < decimals then
+			fractionDigits = string.rep('0', decimals - #fractionDigits) .. fractionDigits
+		end
+		fraction = '.' .. fractionDigits
+	end
+
+	local digits = tostring(integerPart):reverse():gsub('(%d%d%d)', '%1,'):reverse():gsub('^,', '')
+	return sign .. digits .. fraction
 end
 
 if Config.EnableLogoCore then
@@ -796,12 +826,55 @@ RegisterNetEvent('bcc-corehud:setStaminaCore', function(value)
 	end
 
 	local amount = tonumber(value)
-	if not amount then
+	if not amount or amount == 0 then
 		return
 	end
 
-	amount = clamp(amount, 0.0, 100.0)
-	SetAttributeCoreValue(ped, 1, amount)
+	local current = tonumber(GetAttributeCoreValue(ped, 1)) or 0
+	local nextValue = clamp(current + amount, 0.0, 100.0)
+	SetAttributeCoreValue(ped, 1, nextValue)
+end)
+
+RegisterNetEvent('bcc-corehud:setHealthCore', function(value)
+	local ped = PlayerPedId()
+	if ped == 0 or not DoesEntityExist(ped) then
+		return
+	end
+
+	local amount = tonumber(value)
+	if not amount or amount == 0 then
+		return
+	end
+
+	local current = tonumber(GetAttributeCoreValue(ped, 0)) or 0
+	local nextValue = clamp(current + amount, 0.0, 100.0)
+	SetAttributeCoreValue(ped, 0, nextValue)
+end)
+
+RegisterNetEvent('bcc-corehud:applyAttributeOverpower', function(entries)
+	local ped = PlayerPedId()
+	if ped == 0 or not DoesEntityExist(ped) then
+		return
+	end
+
+	if type(entries) ~= 'table' then
+		return
+	end
+
+	for _, spec in ipairs(entries) do
+		if type(spec) == 'table' then
+			local attribute = tonumber(spec.attribute or spec.index or spec.core)
+			local amount = tonumber(spec.amount or spec.value)
+			if attribute and amount then
+				amount = clamp(amount, 0.0, 100.0)
+				if amount > 0.0 then
+					local enable = spec.enable
+					if enable == nil then enable = spec.enabled end
+					EnableAttributeOverpower(ped, attribute, amount, enable ~= false)
+				end
+			end
+		end
+	end
 end)
 
 RegisterNetEvent('hud:client:changeValue', function(stat, value)
@@ -901,9 +974,9 @@ end)
 -- Key loop: voice step cycle
 -- ==========================
 local function setTalkerProximity(m)
-	pcall(MumbleSetTalkerProximity, m)
-	pcall(MumbleSetAudioInputDistance, m)
-	pcall(MumbleSetAudioOutputDistance, m)
+	if type(MumbleSetTalkerProximity) == 'function' then MumbleSetTalkerProximity(m) end
+	if type(MumbleSetAudioInputDistance) == 'function' then MumbleSetAudioInputDistance(m) end
+	if type(MumbleSetAudioOutputDistance) == 'function' then MumbleSetAudioOutputDistance(m) end
 	if Config.devMode then print(('[BCC-CoreHUD] Voice proximity set: %.1fm'):format(m)) end
 end
 
@@ -993,9 +1066,9 @@ CreateThread(function()
 			local ped = PlayerPedId()
 			local tempNow = 0.0
 			if ped ~= 0 then
-				local c = GetEntityCoords(ped)
-				local ok, t = pcall(GetTemperatureAtCoords, c.x, c.y, c.z)
-				tempNow = (ok and tonumber(t)) or 0.0
+					local c = GetEntityCoords(ped)
+					local t = GetTemperatureAtCoords(c.x, c.y, c.z)
+					tempNow = tonumber(t) or 0.0
 			end
 			if Config.TemperatureColdThreshold and tempNow <= Config.TemperatureColdThreshold then
 				currentTemperatureEffect = 'cold'
@@ -1187,24 +1260,24 @@ CreateThread(function()
 				end
 				local function staminaPct(p)
 					if p == PlayerPedId() then
-						local okPlayer, playerRaw = pcall(GetPlayerStamina, PlayerId())
-						if okPlayer and playerRaw ~= nil then
+						local playerRaw = GetPlayerStamina(PlayerId())
+						if playerRaw ~= nil then
 							return clamp(asPercent(playerRaw), 0.0, 100.0)
 						end
 					end
 
 					local st = GetPedStamina(p)
-					local pedDesc = (p == PlayerPedId()) and 'player' or string.format('ped-%s', tostring(p))
+					local pedDesc = (p == PlayerPedId()) and 'player' or ('ped-' .. tostring(p))
 					devPrint(('GetPedStamina(%s) returned %s'):format(pedDesc, tostring(st)))
 					if st then
 						st = tonumber(st)
 						local mst = nil
-						if p == PlayerPedId() then
-							local okMax, playerMax = pcall(GetPlayerMaxStamina, PlayerId())
-							if okMax and playerMax ~= nil then
-								mst = tonumber(playerMax)
+							if p == PlayerPedId() then
+								local playerMax = GetPlayerMaxStamina(PlayerId())
+								if playerMax ~= nil then
+									mst = tonumber(playerMax)
+								end
 							end
-						end
 						if not mst then
 							mst = GetPedMaxStamina(p)
 							devPrint(('GetPedMaxStamina(%s) returned %s'):format(pedDesc, tostring(mst)))
@@ -1265,7 +1338,7 @@ CreateThread(function()
 						if p ~= nil then
 							hungerInner, hungerOuter = toCoreState(p), toCoreMeter(p)
 							hungerInside = eff(p, Config.LowCoreWarning, Config.HungerWarningEffect)
-							hungerNext = string.format('%d%%', round(p))
+								hungerNext = tostring(round(p)) .. '%'
 						end
 					end
 					if needsData.thirst ~= nil then
@@ -1273,7 +1346,7 @@ CreateThread(function()
 						if p ~= nil then
 							thirstInner, thirstOuter = toCoreState(p), toCoreMeter(p)
 							thirstInside = eff(p, Config.LowCoreWarning, Config.ThirstWarningEffect)
-							thirstNext = string.format('%d%%', round(p))
+								thirstNext = tostring(round(p)) .. '%'
 						end
 					end
 					if needsData.stress ~= nil then
@@ -1281,15 +1354,14 @@ CreateThread(function()
 						if p ~= nil then
 							stressInner, stressOuter = toCoreState(p), toCoreMeter(p)
 							stressInside = eff(p, Config.LowCoreWarning, Config.StressWarningEffect)
-							stressNext = string.format('%d%%', round(p))
+								stressNext = tostring(round(p)) .. '%'
 						end
 					end
 				end
 
 				-- temperature mapping
-				local coords = GetEntityCoords(ped)
-				local okT, tnow = pcall(GetTemperatureAtCoords, coords.x, coords.y, coords.z)
-				local worldTemp = (okT and tonumber(tnow)) or 0.0
+					local coords = GetEntityCoords(ped)
+					local worldTemp = tonumber(GetTemperatureAtCoords(coords.x, coords.y, coords.z)) or 0.0
 				if Config.TemperatureColdThreshold and worldTemp <= Config.TemperatureColdThreshold then
 					currentTemperatureEffect = 'cold'
 				elseif Config.TemperatureHotThreshold and worldTemp >= Config.TemperatureHotThreshold then
@@ -1306,7 +1378,7 @@ CreateThread(function()
 				local tempValInner, tempValOuter, tempValNext = nil, nil, nil
 				if tempPct ~= nil then
 					tempValInner, tempValOuter = 15, 99
-					tempValNext = string.format('%d°', round(worldTemp))
+					tempValNext = tostring(round(worldTemp)) .. '°'
 				end
 				if currentTemperatureEffect then
 					tempInner, tempOuter = 15, 99
@@ -1326,10 +1398,15 @@ CreateThread(function()
 				-- voice telemetry
 				local voice
 				if Config.EnableVoiceCore then
-					local okTalking, talking = pcall(MumbleIsPlayerTalking, PlayerId())
-					if okTalking then
-						local okProx, prox = pcall(MumbleGetTalkerProximity)
-						prox = (okProx and tonumber(prox)) or 0.0
+					local talking
+					if type(MumbleIsPlayerTalking) == 'function' then
+						talking = MumbleIsPlayerTalking(PlayerId())
+					end
+					if talking ~= nil then
+						local prox = 0.0
+						if type(MumbleGetTalkerProximity) == 'function' then
+							prox = tonumber(MumbleGetTalkerProximity()) or 0.0
+						end
 						if prox ~= prox or prox == math.huge or prox == -math.huge then prox = 0.0 end
 						local effMax = math.max(Config.VoiceMaxRange or 12.0, voiceStepMax or 12.0)
 						if effMax <= 0.0 then effMax = 12.0 end
@@ -1343,11 +1420,9 @@ CreateThread(function()
 							proximity = prox,
 							proximityPercent = percent
 						}
-					else
-							if Config.devMode and not voiceErrorLogged then
-							devPrint('Voice talking check failed', talking)
-							voiceErrorLogged = true
-						end
+					elseif Config.devMode and not voiceErrorLogged then
+						devPrint('Voice talking check unavailable')
+						voiceErrorLogged = true
 					end
 				end
 
@@ -1387,7 +1462,7 @@ CreateThread(function()
 						local pct = clamp(cleanStatsPercent, 0.0, 100.0)
 						cleanInner = toCoreState(pct)
 						cleanOuter = toCoreMeter(pct)
-						cleanNext = string.format('%d%%', round(pct))
+						cleanNext = tostring(round(pct)) .. '%'
 				end
 
 					updateCleanlinessFlies(cleanStatsPercent)

@@ -488,30 +488,14 @@ local function persistSnapshot(characterId, snapshot)
     return true
 end
 
-local CORE_ORDER = {
-    'default',
-    'health',
-    'stamina',
-    'hunger',
-    'thirst',
-    'stress',
-    'temperature',
-    'temperature_value',
-    'voice',
-    'horse_health',
-    'horse_stamina',
-    'horse_dirt'
-}
-
 local function sanitizePalette(snapshot)
     if type(snapshot) ~= 'table' then
         return nil
     end
 
     local sanitized = {}
-    for _, key in ipairs(CORE_ORDER) do
-        local entry = snapshot[key]
-        if type(entry) == 'table' then
+    for key, entry in pairs(snapshot) do
+        if type(key) == 'string' and type(entry) == 'table' then
             local hue = tonumber(entry.hue)
             local saturation = tonumber(entry.saturation)
             if hue then
@@ -1077,10 +1061,38 @@ local function registerNeedItems()
                 })
 
                 local staminaValue = tonumber(entry.stamina)
-                if staminaValue then
-                    if staminaValue < 0 then staminaValue = 0 end
+                if staminaValue and staminaValue > 0 then
                     if staminaValue > 100 then staminaValue = 100 end
                     TriggerClientEvent('bcc-corehud:setStaminaCore', src, staminaValue)
+                end
+
+                local healthValue = tonumber(entry.health or entry.healthCore)
+                if healthValue and healthValue > 0 then
+                    if healthValue > 100 then healthValue = 100 end
+                    TriggerClientEvent('bcc-corehud:setHealthCore', src, healthValue)
+                end
+
+                local overpower = {}
+                local function queueOverpower(attributeIndex, value)
+                    local amount = tonumber(value)
+                    if amount and amount ~= 0 then
+                        if amount < 0 then amount = 0 end
+                        if amount > 100 then amount = 100 end
+                        overpower[#overpower + 1] = {
+                            attribute = attributeIndex,
+                            amount = amount,
+                            enable = true
+                        }
+                    end
+                end
+
+                queueOverpower(0, entry.OuterCoreHealthGold)
+                queueOverpower(0, entry.InnerCoreHealthGold)
+                queueOverpower(1, entry.OuterCoreStaminaGold)
+                queueOverpower(1, entry.InnerCoreStaminaGold)
+
+                if #overpower > 0 then
+                    TriggerClientEvent('bcc-corehud:applyAttributeOverpower', src, overpower)
                 end
             end)
         end
