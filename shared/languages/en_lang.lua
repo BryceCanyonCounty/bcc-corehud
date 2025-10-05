@@ -11,6 +11,7 @@ Locales["en_lang"] = {
     hud_voice_mode_normal = "Voice mode: Normal",
     hud_voice_mode_shout = "Voice mode: Shout",
     hud_need_hunger_low = "Starving",
+    hud_need_hunger_overfed = "You are already full.",
     hud_need_thirst_low = "Parched",
     hud_need_stress_low = "Stressed",
     smoke = "Smoke",

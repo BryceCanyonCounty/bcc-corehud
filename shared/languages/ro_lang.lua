@@ -11,6 +11,7 @@ Locales["ro_lang"] = {
     hud_voice_mode_normal = "Mod voce: Normal",
     hud_voice_mode_shout = "Mod voce: Strigăt",
     hud_need_hunger_low = "Înfometat",
+    hud_need_hunger_overfed = "Ești deja sătul.",
     hud_need_thirst_low = "Deshidratat",
     hud_need_stress_low = "Stresat",
     smoke = "Fumeaza",

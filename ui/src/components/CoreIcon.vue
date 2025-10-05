@@ -70,7 +70,7 @@ const ICON_IMAGE_MAP = {
   },
   thirst: {
     default: 'cores/rpg_textures/rpg_generic_bottle.png',
-    parched: 'cores/rpg_textures/rpg_drained.png'
+    parched: 'cores/rpg_textures/rpg_generic_empty_bottle.png'
   },
   temperature: {
     cold: 'cores/rpg_textures/rpg_cold.png',

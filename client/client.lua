@@ -144,6 +144,7 @@ end
 -- Needs state
 -- =============
 local localNeedsState = { hunger = nil, thirst = nil, stress = nil }
+local hungerOverfedActive = false
 local needsDecayTrackers, currentTemperatureEffect = {}, nil
 local starvationTimer, starvationElapsed, starvationDelaySatisfied = 0.0, 0.0, false
 local needsErrorLogged, voiceErrorLogged = false, false
@@ -759,6 +760,7 @@ local function setLocalNeedValue(stat, value, options)
 		localNeedsState[stat] = nil
 		-- keep tracker value cleared if other code reads it, but no timers/rates
 		if needsDecayTrackers[stat] then needsDecayTrackers[stat].value = nil end
+		if stat == 'hunger' then hungerOverfedActive = false end
 		return
 	end
 
@@ -767,6 +769,13 @@ local function setLocalNeedValue(stat, value, options)
 
 	local previous = localNeedsState[stat]
 	localNeedsState[stat] = n
+
+	if stat == 'hunger' then
+		if n < 100.0 and hungerOverfedActive then
+			hungerOverfedActive = false
+			if hudVisible then hudImmediate = true end
+		end
+	end
 
 	-- warnings (unchanged)
 	if stat == 'hunger' or stat == 'thirst' then
@@ -928,6 +937,15 @@ exports('AddNeed', function(stat, delta)
 	end
 
 	local cur = tonumber(localNeedsState[stat]) or 0.0
+	if stat == 'hunger' and d > 0 and cur >= 100.0 then
+		hungerOverfedActive = true
+		local message = _U('hud_need_hunger_overfed') or 'You feel overfed.'
+		if type(message) == 'string' and message ~= '' then
+			Notify(message, 'info')
+		end
+		if hudVisible then hudImmediate = true end
+		return
+	end
 	setLocalNeedValue(stat, math.max(0.0, math.min(100.0, cur + d)))
 end)
 
@@ -1099,112 +1117,101 @@ CreateThread(function()
 	while true do
 		Wait(needsWaitMs)
 
-		do
-			local ped = PlayerPedId()
-			local tempNow = 0.0
-			if ped ~= 0 then
-				local c = GetEntityCoords(ped)
-				local t = GetTemperatureAtCoords(c.x, c.y, c.z)
-				tempNow = tonumber(t) or 0.0
-			end
-			if Config.TemperatureColdThreshold and tempNow <= Config.TemperatureColdThreshold then
-				currentTemperatureEffect = 'cold'
-			elseif Config.TemperatureHotThreshold and tempNow >= Config.TemperatureHotThreshold then
-				currentTemperatureEffect = 'hot'
-			else
-				currentTemperatureEffect = nil
-			end
-
-			if Config.NeedsAutoDecay then
+			do
 				local ped = PlayerPedId()
-
-				-- activity label
-				local label = 'idle'
+				local tempNow = 0.0
 				if ped ~= 0 then
-					if IsPedOnMount(ped) then
-						label = 'mounted'
-					elseif IsPedSwimming(ped) or IsPedSwimmingUnderWater(ped) then
-						label = 'swim'
-					elseif IsPedSprinting(ped) then
-						label = 'sprint'
-					elseif IsPedRunning(ped) then
-						label = 'run'
-					elseif IsPedWalking(ped) then
-						label = 'walk'
-					elseif IsPedStill(ped) then
-						label = 'idle'
-					else
-						label = 'idle'
-					end
+					local c = GetEntityCoords(ped)
+					local t = GetTemperatureAtCoords(c.x, c.y, c.z)
+					tempNow = tonumber(t) or 0.0
+				end
+				if Config.TemperatureColdThreshold and tempNow <= Config.TemperatureColdThreshold then
+					currentTemperatureEffect = 'cold'
+				elseif Config.TemperatureHotThreshold and tempNow >= Config.TemperatureHotThreshold then
+					currentTemperatureEffect = 'hot'
+				else
+					currentTemperatureEffect = nil
 				end
 
-				if label == 'mounted' and (type(Config.ActivityMultipliers) ~= 'table' or not Config.ActivityMultipliers.mounted) then
-					label = 'run'
-				end
-
-				if label ~= lastActivityLabel then
-					logActivity(label)
-					lastActivityLabel = label
-					if hudVisible then hudImmediate = true end
-				end
-
-				-- absolute per-tick drains
-				local conf = (type(Config.ActivityMultipliers) == 'table' and Config.ActivityMultipliers[label]) or {}
-				local hungerDrain = tonumber(conf.hunger) or 0.0
-				local thirstDrain = tonumber(conf.thirst) or 0.0
-
-				local function applyDrain(stat, dec)
-					if dec <= 0 then return end
-					local cur = localNeedsState[stat]
-					if cur == nil or cur <= 0 then return end
-					local nextVal = clamp(cur - dec, 0.0, 100.0)
-					setLocalNeedValue(stat, nextVal, { resetDelay = false })
-					devPrint(("[decay] %s %s %.2f -> %.2f (%.2f removed)"):format(label, stat, cur, nextVal, dec))
-				end
-
-				-- apply drains now (per tick)
-				applyDrain('hunger', hungerDrain)
-				applyDrain('thirst', thirstDrain)
-
-				-- recompute empties AFTER drain
 				local isHungerEmpty = localNeedsState.hunger ~= nil and localNeedsState.hunger <= 0.0
 				local isThirstEmpty = localNeedsState.thirst ~= nil and localNeedsState.thirst <= 0.0
 
-				-- starvation (unchanged logic)
+				if Config.NeedsAutoDecay then
+					local label = 'idle'
+					if ped ~= 0 then
+						if IsPedOnMount(ped) then
+							label = 'mounted'
+						elseif IsPedSwimming(ped) or IsPedSwimmingUnderWater(ped) then
+							label = 'swim'
+						elseif IsPedSprinting(ped) then
+							label = 'sprint'
+						elseif IsPedRunning(ped) then
+							label = 'run'
+						elseif IsPedWalking(ped) then
+							label = 'walk'
+						elseif IsPedStill(ped) then
+							label = 'idle'
+						else
+							label = 'idle'
+						end
+					end
+
+					if label == 'mounted' and (type(Config.ActivityMultipliers) ~= 'table' or not Config.ActivityMultipliers.mounted) then
+						label = 'run'
+					end
+
+					if label ~= lastActivityLabel then
+						logActivity(label)
+						lastActivityLabel = label
+						if hudVisible then hudImmediate = true end
+					end
+
+					local conf = (type(Config.ActivityMultipliers) == 'table' and Config.ActivityMultipliers[label]) or {}
+					local hungerDrain = tonumber(conf.hunger) or 0.0
+					local thirstDrain = tonumber(conf.thirst) or 0.0
+
+					local function applyDrain(stat, dec)
+						if dec <= 0 then return end
+						local cur = localNeedsState[stat]
+						if cur == nil or cur <= 0 then return end
+						local nextVal = clamp(cur - dec, 0.0, 100.0)
+						setLocalNeedValue(stat, nextVal, { resetDelay = false })
+						devPrint(("[decay] %s %s %.2f -> %.2f (%.2f removed)"):format(label, stat, cur, nextVal, dec))
+					end
+
+					applyDrain('hunger', hungerDrain)
+					applyDrain('thirst', thirstDrain)
+
+					isHungerEmpty = localNeedsState.hunger ~= nil and localNeedsState.hunger <= 0.0
+					isThirstEmpty = localNeedsState.thirst ~= nil and localNeedsState.thirst <= 0.0
+				end
+
 				if C.starvationDamageAmount > 0.0 then
 					if isHungerEmpty and isThirstEmpty then
-						starvationElapsed = starvationElapsed + updateIntervalSteps
-						if starvationElapsed >= C.starvationDamageDelay then
-							if not starvationDelaySatisfied then
-								starvationDelaySatisfied = true
-								if C.starvationDamageInterval > 0.0 then starvationTimer = C.starvationDamageInterval end
-							end
-							if C.starvationDamageInterval <= 0.0 then
-								if ped ~= 0 and not IsEntityDead(ped) then
-									local dmg = math.floor(C.starvationDamageAmount + 0.5)
-									if dmg > 0 then ChangeEntityHealth(ped, -dmg, 0, 0) end
-								end
-							else
-								starvationTimer = starvationTimer + updateIntervalSteps
-								if starvationTimer >= C.starvationDamageInterval then
-									starvationTimer = starvationTimer - C.starvationDamageInterval
-									if ped ~= 0 and not IsEntityDead(ped) then
-										local dmg = math.floor(C.starvationDamageAmount + 0.5)
-										if dmg > 0 then ChangeEntityHealth(ped, -dmg, 0, 0) end
+						starvationElapsed, starvationTimer, starvationDelaySatisfied = 0.0, 0.0, true
+						if ped ~= 0 and not IsEntityDead(ped) then
+							local dmg = math.floor(C.starvationDamageAmount + 0.5)
+							if dmg > 0 then
+								local currentHealth = GetEntityHealth(ped)
+									if currentHealth ~= nil then
+										if Config.DoHealthPainSound then
+											PlayPain(ped, 9, 1, true, true)
+										end
+										local nextHealth = math.max(0, currentHealth - dmg)
+										SetEntityHealth(ped, nextHealth, 0)
+										if Config.DoHealthDamageFx then AnimpostfxPlay('MP_Downed') end
 									end
 								end
 							end
 						else
-							starvationTimer = 0.0
+							starvationElapsed, starvationTimer, starvationDelaySatisfied = 0.0, 0.0, false
+							if Config.DoHealthDamageFx then AnimpostfxStop('MP_Downed') end
 						end
 					else
 						starvationElapsed, starvationTimer, starvationDelaySatisfied = 0.0, 0.0, false
+						if Config.DoHealthDamageFx then AnimpostfxStop('MP_Downed') end
 					end
-				else
-					starvationElapsed, starvationTimer, starvationDelaySatisfied = 0.0, 0.0, false
-				end
 
-				-- heat drain + warning (keep as you had)
 				local isHot = false
 				if ped ~= 0 and not IsEntityDead(ped) then
 					isHot = select(1, applySimpleTemperatureDamage(ped, tempNow))
@@ -1236,8 +1243,7 @@ CreateThread(function()
 				end
 			end
 		end
-	end
-end)
+	end)
 
 CreateThread(function()
 	while true do
@@ -1341,7 +1347,8 @@ CreateThread(function()
 						local p = pctOrNil(tonumber(needsData.hunger))
 						if p ~= nil then
 							hungerInner, hungerOuter = toCoreState(p), toCoreMeter(p)
-							hungerInside = eff(p, Config.LowCoreWarning, _U("hud_need_hunger_low"))
+							local hungerEffect = hungerOverfedActive and 'overfed' or eff(p, Config.LowCoreWarning, 'starving')
+							hungerInside = hungerEffect
 							hungerNext = tostring(round(p)) .. '%'
 						end
 					end
@@ -1350,7 +1357,7 @@ CreateThread(function()
 						local p = pctOrNil(tonumber(needsData.thirst))
 						if p ~= nil then
 							thirstInner, thirstOuter = toCoreState(p), toCoreMeter(p)
-							thirstInside = eff(p, Config.LowCoreWarning, _U("hud_need_thirst_low"))
+							thirstInside = eff(p, Config.LowCoreWarning, 'parched')
 							thirstNext = tostring(round(p)) .. '%'
 						end
 					end
@@ -1359,7 +1366,7 @@ CreateThread(function()
 						local p = pctOrNil(tonumber(needsData.stress))
 						if p ~= nil then
 							stressInner, stressOuter = toCoreState(p), toCoreMeter(p)
-							stressInside = eff(p, Config.LowCoreWarning, _U("hud_need_stress_low"))
+							stressInside = eff(p, Config.LowCoreWarning, 'stressed')
 							stressNext = tostring(round(p)) .. '%'
 						end
 					end

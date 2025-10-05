@@ -1,10 +1,6 @@
-<1.6.0>
-- Updated activity multiplier to tick every second  
-- Added smoke effects — credits to **HerosTicWorld** ([heros_tobacco](https://github.com/HerosTicWorld/heros_tobacco))  
-- Added missing localizations  
-- Moved several events to **BccUtils RPC**  
-- Fixed palette not loading after restart or when player logs in  
-- Added extra check for when `UiAppsActive`  
-- Fixed update intervals to remove delay when showing draining cores  
-- Removed redundant config code  
-- Various other fixes and performance improvements  
+<1.6.1>
+- Added overfeed notification message  
+- Fixed issue where health would not drain when hunger and thirst reached 0  
+- Changed starvation logic to run by tick instead of timers for smoother updates  
+- Fixed various HUD visual effects  
+- Added an empty bottle icon when thirst is depleted
