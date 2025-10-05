@@ -1,14 +1,14 @@
 Config                          = {}
 
 -- Locale key used by locale.lua (must exist in Locales table)
-Config.defaultlang              = 'ro_lang'
+Config.defaultlang              = 'en_lang'
 
 -- Client HUD behaviour
 Config.AutoShowHud              = true         -- Set to false to require manual /togglehud on spawn
 Config.UpdateInterval           = 5000         -- Core refresh rate in milliseconds
 Config.NeedsUpdateInterval      = 5000         -- Interval (ms) at which hunger/thirst/temperature logic runs
 Config.LowCoreWarning           = 25.0         -- Trigger status effects when cores fall below this percent
-Config.devMode                  = true         -- Enable verbose client logging when true
+Config.devMode                  = false         -- Enable verbose client logging when true
 Config.HorseDirtyThreshold      = 4            -- Attribute rank at/below which the horse shows the dirty icon (0-10, set false to disable)
 Config.TemperatureColdThreshold = -3.0         -- World temperature (Celsius) at/below which cold icon appears
 Config.TemperatureHotThreshold  = 26.0         -- World temperature (Celsius) at/above which hot icon appears
