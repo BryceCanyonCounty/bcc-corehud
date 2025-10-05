@@ -14,7 +14,7 @@ An opinionated RedM HUD for player, mount, voice, temperature and cleanliness te
 - **Modular consumable config** – Need item definitions live in `shared/config/needitems/*.lua`; add or remove packs without touching core config.
 - **Robust persistence** – Character layouts, palettes, needs and balances survive restarts. Automatic DB bootstrap via `server/dbUpdater.lua`.
 - **Vue 3 SPA** – Vite-powered UI with hot reload for rapid iteration.
-
+<img width="1913" height="1072" alt="image" src="https://github.com/user-attachments/assets/74dba634-08a8-4cfc-a9b6-0c1bd5a0c540" />
 ## Requirements
 
 | Dependency | Purpose |
