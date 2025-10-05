@@ -2,14 +2,14 @@
 
 An opinionated RedM HUD for player, mount, voice, temperature and cleanliness telemetry with a Vue 3/Tailwind SPA front end. The resource includes layout and palette editors, oxmysql persistence, additive core buffs, consumable helpers and optional auto-decay for hunger/thirst.
 
-> **Quick start:** drop the resource in `resources/[BCC]/bcc-corehud`, ensure `oxmysql` and (optionally) `vorp_core` + `vorp_inventory`, then `ensure bcc-corehud`.
+> **Quick start:** drop the resource in `resources/[BCC]/bcc-corehud`, ensure `oxmysql`, `vorp_core`, `vorp_inventory`, `bcc-utils`, and `feather-menu`, then `ensure bcc-corehud`.
 
 ## Highlights
 
 - **Complete core suite** – Health, stamina, hunger, thirst, stress, temperature, money, gold, experience, tokens and horse telemetry, each with configurable warning thresholds.
 - **Needs & buffs** – Built-in auto-decay or external data via exports. Consumables can push additive health/stamina boosts and golden core overpower using the RedM helpers.
 - **Voice awareness** – Mumble proximity visualiser plus talking indicator, configurable labels and keybind cycling.
-- **Cleanliness feedback** – Horse dirt badge and player cleanliness core with optional flies FX, cooldown-based warnings and starvation/penalty hooks.
+- **Cleanliness feedback** – Horse dirt badge and player cleanliness core with flies FX, cooldown-based warnings and starvation/penalty hooks.
 - **Palette & layout editor** – Drag, drop and recolour every widget in-game; snapshots persist per character through oxmysql.
 - **Modular consumable config** – Need item definitions live in `shared/config/needitems/*.lua`; add or remove packs without touching core config.
 - **Robust persistence** – Character layouts, palettes, needs and balances survive restarts. Automatic DB bootstrap via `server/dbUpdater.lua`.
@@ -22,14 +22,32 @@ An opinionated RedM HUD for player, mount, voice, temperature and cleanliness te
 | [RedM (cerulean FXServer)](https://redm.net/) | Runtime |
 | [oxmysql](https://github.com/overextended/oxmysql) | Layout/palette/needs persistence |
 | [VORP Core](https://github.com/VORPCORE/vorp-core) *(recommended)* | Character resolution & balance sync |
-| [vorp_inventory](https://github.com/VORPCORE/vorp_inventory) *(optional)* | Automatic consumable registration |
-| [feather-menu](https://github.com/feather-framework/feather-menu) *(optional)* | Palette editor UI |
+| [bcc-utils](https://github.com/BryceCanyonCounty/bcc-utils) *(recommended)* | Shared helpers (consumables, horses, RPC) |
+| [vorp_inventory](https://github.com/VORPCORE/vorp_inventory) | Automatic consumable registration |
+| [feather-menu](https://github.com/feather-framework/feather-menu) | Palette editor UI |
 | Node.js 18+ & Yarn 1.22+ *(optional)* | Building the NUI bundle when customising |
+
+### Disabling the stock VORP HUD
+
+When running `vorp_core`, disable its default gold/money/token/id displays so bcc-corehud can render those cores instead. In `resources/[VORP]/[vorp_essentials]/vorp_core/config/config.lua` ensure the UI flags are set to `true`:
+
+```
+    HideUi     = true
+    HideGold   = true
+    HideMoney  = true
+    HideLevel  = true
+    HideID     = true
+    HideTokens = true
+```
+
+With VORP’s HUD hidden, keep the corresponding cores enabled in `bcc-corehud` (money, gold, experience, tokens, player ID) so they remain visible to players.
+
+> **Heads-up:** You don’t need `vorp_metabolism`. bcc-corehud already handles needs persistence, optional auto-decay, consumable helpers, temperature/stress effects, and UI layout/palette tools—everything you need for a richer metabolism experience.
 
 ## Installation
 
 1. Copy the repository into your server resources (keep the `[BCC]` folder if you like).
-2. (Optional) Build the UI when making changes:
+2. (Optional) Build the UI when making changes (skip this if you deploy a pre-built release):
    ```bash
    cd resources/[BCC]/bcc-corehud/ui
    yarn install
@@ -38,7 +56,10 @@ An opinionated RedM HUD for player, mount, voice, temperature and cleanliness te
 3. Ensure dependencies before the HUD in `server.cfg`:
    ```cfg
    ensure oxmysql
-   ensure vorp_core      # optional but recommended
+   ensure vorp_core
+   ensure vorp_inventory
+   ensure feather-menu
+   ensure bcc-utils
    ensure bcc-corehud
    ```
 4. Restart the server (`refresh` + `ensure bcc-corehud` works too). The database table is created automatically on first run.
@@ -111,12 +132,6 @@ exports['bcc-corehud']:AddNeed('clean_stats', 100)
 2. Run `yarn dev` inside `ui/` for hot reload during UI changes.
 3. `yarn build` to produce production assets, then restart the resource.
 
-Lint the UI (optional):
-
-```bash
-yarn lint
-```
-
 ## Notable Implementation Details
 
 - Cleanliness warnings initialise lazily and only fire once you actually dip below `Config.MinCleanliness`, preventing notification spam on resource restarts.
@@ -132,3 +147,5 @@ yarn lint
 - Licensed under the terms in `LICENSE.md`.
 
 Pull requests and issue reports are welcome. Enjoy the HUD!
+
+- Need more help? Join the bcc discord here: https://discord.gg/VrZEEpBgZJ
