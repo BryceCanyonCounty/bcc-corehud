@@ -1,5 +1,3 @@
--- inline computeActivityMultipliers
-
 hm, tm = 1.0, 1.0
 local ACTIVITY_MIN, ACTIVITY_MAX = 0.1, 3.0
 

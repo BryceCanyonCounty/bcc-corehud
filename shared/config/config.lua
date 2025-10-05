@@ -6,6 +6,7 @@ Config.defaultlang              = 'ro_lang'
 -- Client HUD behaviour
 Config.AutoShowHud              = true         -- Set to false to require manual /togglehud on spawn
 Config.UpdateInterval           = 5000         -- Core refresh rate in milliseconds
+Config.NeedsUpdateInterval      = 5000         -- Interval (ms) at which hunger/thirst/temperature logic runs
 Config.LowCoreWarning           = 25.0         -- Trigger status effects when cores fall below this percent
 Config.devMode                  = true         -- Enable verbose client logging when true
 Config.HorseDirtyThreshold      = 4            -- Attribute rank at/below which the horse shows the dirty icon (0-10, set false to disable)
@@ -14,22 +15,17 @@ Config.TemperatureHotThreshold  = 26.0         -- World temperature (Celsius) at
 Config.TemperatureMin           = -15.0        -- Minimum world temperature mapped to the core (Celsius)
 Config.TemperatureMax           = 40.0         -- Maximum world temperature mapped to the core (Celsius)
 Config.AlwaysShowTemperature    = true         -- When true the temperature core is shown even without hot/cold effects
-Config.HungerWarningEffect      = 'starving'   -- Label shown when hunger drops below LowCoreWarning
-Config.ThirstWarningEffect      = 'parched'    -- Label shown when thirst drops below LowCoreWarning
-Config.StressWarningEffect      = 'stressed'   -- Label shown when stress falls below LowCoreWarning
 Config.NeedsAutoDecay           = true         -- When true and no external needs resource is configured, hunger/thirst decay over time
 Config.NeedsDecayStartDelay     = 300.0        -- Seconds to wait before decay begins after a refill (5 minutes)
-Config.HungerRate               = 0.10         -- Percent-per-second hunger decay applied once the delay expires
-Config.ThirstRate               = 0.15         -- Percent-per-second thirst decay applied once the delay expires
-Config.MountedHungerRate        = 0.10         -- Hunger decay rate applied while riding a mount
-Config.MountedThirstRate        = 0.15         -- Thirst decay rate applied while riding a mount
+--This multipliers drain the activity by tick(second)
 Config.ActivityMultipliers      = {
-    idle   = { hunger = 0.10, thirst = 0.15 }, -- applied repeatedly while almost still
-    walk   = { hunger = 0.20, thirst = 0.30 }, -- gentle movement
+    idle   = { hunger = 0.05, thirst = 0.07 }, -- applied repeatedly while almost still
+    walk   = { hunger = 0.10, thirst = 0.20 }, -- gentle movement
     run    = { hunger = 0.45, thirst = 0.60 }, -- steady run
     sprint = { hunger = 0.65, thirst = 0.80 }, -- full sprint
     coast  = { hunger = 0.65, thirst = 0.40 }, -- default fallback when standing but not flagged idle
-    swim   = { hunger = 0.65, thirst = 0.40 }  -- swimming effort
+    swim   = { hunger = 0.65, thirst = 0.40 },  -- swimming effort
+    mounted = { hunger = 0.08, thirst = 0.08 }
 }
 Config.InitialNeedValue         = 100.0        -- Default hunger/thirst value applied on spawn when using local decay
 
@@ -38,11 +34,9 @@ Config.MinTemp                  = -5.0                                   -- Temp
 Config.MaxTemp                  = 31.0                                   -- Temperatures above this deal health damage each HUD tick
 Config.RemoveHealth             = 5                                      -- Health removed per tick while outside the safe temperature range
 Config.HotTempThirstDrain       = 1.5                                    -- Percent thirst removed per tick while above Config.MaxTemp
-Config.TempWarningMessage       = "Nu poți sta în soare, găsește umbră!" -- Notification shown when overheating
 Config.TempWarningCooldown      = 10.0                                   -- Seconds between repeated overheat warnings
 Config.DoHealthDamageFx         = true                                   -- Play the "MP_Downed" screen effect while taking temperature damage
 Config.DoHealthPainSound        = true                                   -- Play the pain grunt when temperature damage applies
-
 Config.StarvationDamageDelay    = 120.0                                  -- Seconds both hunger and thirst must be empty before health damage starts (set 0 to disable)
 Config.StarvationDamageInterval = 10.0                                   -- Seconds between health damage ticks once starvation damage begins
 Config.StarvationDamageAmount   = 3                                      -- Health removed each tick when starving/dehydrated (set 0 to disable)
@@ -50,12 +44,8 @@ Config.StarvationDamageAmount   = 3                                      -- Heal
 -- Voice indicator
 Config.EnableVoiceCore          = true                             -- Toggle the voice range core
 Config.VoiceMaxRange            = 50.0                             -- Maximum voice range (in metres) used to normalise the ring
-Config.VoiceTalkingLabel        = 'talking'                        -- Label shown while the player is transmitting voice
-
 Config.VoiceProximitySteps      = { 2.0, 15.0, 50.0 }              -- whisper / normal / shout
-Config.VoiceProximityLabels     = { 'Whisper', 'Normal', 'Shout' } -- optional custom labels matching the steps
 Config.VoiceDefaultStepIndex    = 2                                -- start on 15m
--- Use a control hash or a named control (GetHashKey name). Change to what you want.
 Config.VoiceCycleControl        = 0x446258B6                       -- example key/control (PGUP)
 
 -- Mailbox indicator (integrates with bcc-mailbox)
@@ -116,3 +106,13 @@ if type(AddNeedItems) ~= 'function' then
         end
     end
 end
+
+Config.Prompts = { 
+    Drop = "Drop",                    
+    DropKey = 0x3B24C470,              -- F
+    Smoke = "Smoke",
+    Chewing = "Chew",
+    SmokeKey = 0x07B8BEAF,             -- LMB
+    Change = "Change",
+    ChangeKey = 0xD51B784F,            -- E
+}

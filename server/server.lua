@@ -1,14 +1,3 @@
-local Config = Config or {}
-BccUtils = exports['bcc-utils'].initiate()
-local Core = nil
-if exports and exports.vorp_core and exports.vorp_core.GetCore then
-    Core = exports.vorp_core:GetCore()
-end
-
-local saveEnabled = true
-local debugEnabled = Config.devMode == true
-local tableName = 'bcc_corehud'
-
 local defaultNeedValue = tonumber(Config.InitialNeedValue) or 100.0
 if defaultNeedValue < 0.0 then defaultNeedValue = 0.0 end
 if defaultNeedValue > 100.0 then defaultNeedValue = 100.0 end
@@ -41,15 +30,15 @@ local characterNeeds = {}
 local pendingCharacterRequests = {}
 
 local NUMERIC_FIELDS = {
-    { key = 'innerhealth', min = 0, max = 15, default = 0, required = true },
-    { key = 'outerhealth', min = 0, max = 99, default = 0, required = true },
-    { key = 'innerstamina', min = 0, max = 15, default = 0, required = true },
-    { key = 'outerstamina', min = 0, max = 99, default = 0, required = true },
-    { key = 'outerhunger', min = 0, max = 99 },
-    { key = 'outerthirst', min = 0, max = 99 },
-    { key = 'outerstress', min = 0, max = 99 },
-    { key = 'innerhorse_health', min = 0, max = 15 },
-    { key = 'outerhorse_health', min = 0, max = 99 },
+    { key = 'innerhealth',        min = 0, max = 15, default = 0, required = true },
+    { key = 'outerhealth',        min = 0, max = 99, default = 0, required = true },
+    { key = 'innerstamina',       min = 0, max = 15, default = 0, required = true },
+    { key = 'outerstamina',       min = 0, max = 99, default = 0, required = true },
+    { key = 'outerhunger',        min = 0, max = 99 },
+    { key = 'outerthirst',        min = 0, max = 99 },
+    { key = 'outerstress',        min = 0, max = 99 },
+    { key = 'innerhorse_health',  min = 0, max = 15 },
+    { key = 'outerhorse_health',  min = 0, max = 99 },
     { key = 'innerhorse_stamina', min = 0, max = 15 },
     { key = 'outerhorse_stamina', min = 0, max = 99 }
 }
@@ -72,28 +61,10 @@ local BALANCE_EVENT_MAP = {
     Xp    = { cacheKey = 'exp', event = 'bcc-corehud:setExp' }
 }
 
-local function debugPrint(...)
-    if not debugEnabled then
-        return
-    end
-    local args = { ... }
-    for i, v in ipairs(args) do
-        args[i] = tostring(v)
-    end
-    print('[BCC-CoreHUD][server]', table.concat(args, ' '))
-end
-
 local function clamp(value, minValue, maxValue)
     if value < minValue then return minValue end
     if value > maxValue then return maxValue end
     return value
-end
-
-local function toPercent(value)
-    if value == nil then return nil end
-    local number = tonumber(value)
-    if not number then return nil end
-    return clamp(number, 0.0, 100.0)
 end
 
 local function ensurePlayerState(src)
@@ -169,115 +140,67 @@ local function resolveSource(characterId)
     characterId = characterId and tostring(characterId) or nil
     if not characterId then return nil end
     local src = characterSources[characterId]
-    if src and GetPlayerName(src) then
+    if src then
         return src
     end
     characterSources[characterId] = nil
     return nil
 end
 
-local function getUser(src)
-    if not Core or not Core.getUser then
-        return nil
-    end
-    local ok, result = pcall(Core.getUser, src)
-    if not ok then
-        debugPrint('getUser failed', result)
-        return nil
-    end
-    return result
-end
-
-local function getCharacterFromUser(user)
-    if not user then
-        return nil
-    end
-    local character = user.getUsedCharacter
-    if type(character) == 'function' then
-        local ok, value = pcall(character, user)
-        if ok then
-            character = value
-        else
-            character = nil
-        end
-    end
-    return character
-end
-
-local function getCharacterId(src)
-    if not src then return nil end
-    local user = getUser(src)
-    if not user then return nil end
-    local character = getCharacterFromUser(user)
-    if not character then return nil end
-    local identifier = character.charIdentifier or character.charidentifier or character.identifier
-    if identifier == nil and type(character.charid) ~= 'nil' then
-        identifier = character.charid
-    end
-    if identifier == nil then
-        return nil
-    end
-    return tostring(identifier)
-end
-
-local function withCharacterId(src, context, callback)
-    if type(callback) ~= 'function' then
+local function clearSourceState(src)
+    if not src then
         return
     end
 
-    local characterId = getCharacterId(src)
-    if characterId then
-        callback(characterId)
+    pendingCharacterRequests[src] = nil
+
+    local state = playerStates[src]
+    if not state then
         return
     end
 
-    if not GetPlayerName(src) then
-        return
+    local characterId = state.characterId
+    if characterId and characterSources[characterId] == src then
+        characterSources[characterId] = nil
     end
 
-    local entry = pendingCharacterRequests[src]
-    if not entry then
-        entry = { callbacks = {}, context = context, attempts = 0 }
-        pendingCharacterRequests[src] = entry
-
-        CreateThread(function()
-            while entry.attempts < 80 do
-                Wait(250)
-
-                if not GetPlayerName(src) then
-                    pendingCharacterRequests[src] = nil
-                    return
-                end
-
-                local resolved = getCharacterId(src)
-                if resolved then
-                    pendingCharacterRequests[src] = nil
-                    for _, cb in ipairs(entry.callbacks) do
-                        local ok, err = pcall(cb, resolved)
-                        if not ok then
-                            print('^1[BCC-CoreHUD]^0 character callback error:', err)
-                        end
-                    end
-                    return
-                end
-
-                entry.attempts = entry.attempts + 1
-            end
-
-            pendingCharacterRequests[src] = nil
-            if debugEnabled then
-                debugPrint('character resolution timed out', src, context or 'unknown')
-            end
-        end)
-    end
-
-    entry.callbacks[#entry.callbacks + 1] = callback
+    playerStates[src] = nil
 end
 
 local function linkSourceToCharacter(src, characterId)
-    if not characterId then return end
-    ensurePlayerState(src).characterId = characterId
+    if not characterId then
+        devPrint("Missing characterId for src:", src)
+        return
+    end
+
+    devPrint(("Linking src=%s to characterId=%s"):format(tostring(src), tostring(characterId)))
+
+    local state = ensurePlayerState(src)
+    local previousCharacter = state.characterId
+
+    if previousCharacter and previousCharacter ~= characterId then
+        if characterSources[previousCharacter] == src then
+            devPrint(("Removing old mapping: characterSources[%s] = %s"):format(tostring(previousCharacter),
+                tostring(src)))
+            characterSources[previousCharacter] = nil
+        else
+            devPrint("No old mapping found for previous character")
+        end
+
+        -- wipe cached state when the player switches characters
+        devPrint("Clearing cached state for src:", src)
+        state.palette = nil
+        state.layout = nil
+        state.needs = {}
+        state.snapshot = nil
+        state.balances = {}
+    end
+
+    -- store the new mapping
+    state.characterId = characterId
     characterSources[characterId] = src
+
+    --devPrint(("[linkSourceToCharacter] ✅ Linked src=%s <-> characterId=%s"):format(tostring(src), tostring(characterId)))
 end
 
 local function parsePercentFromEffect(effect)
@@ -349,22 +272,35 @@ end
 
 local function sanitizeSnapshot(data)
     if type(data) ~= 'table' then
+        devPrint("[sanitizeSnapshot] ❌ Invalid snapshot payload type:", type(data))
         return nil
     end
 
     local sanitized = {}
 
     for _, entry in ipairs(NUMERIC_FIELDS) do
-        local value = data[entry.key]
+        local key = entry.key
+        local value = data[key]
         local number = tonumber(value)
+
         if number ~= nil then
-            if entry.min and number < entry.min then number = entry.min end
-            if entry.max and number > entry.max then number = entry.max end
-            sanitized[entry.key] = math.floor(number + 0.5)
+            local original = number
+            if entry.min and number < entry.min then
+                --devPrint(("[sanitizeSnapshot] ⚠️ '%s' below min (%s < %s) → clamped"):format(key, tostring(number), tostring(entry.min)))
+                number = entry.min
+            end
+            if entry.max and number > entry.max then
+                --devPrint(("[sanitizeSnapshot] ⚠️ '%s' above max (%s > %s) → clamped"):format(key, tostring(number), tostring(entry.max)))
+                number = entry.max
+            end
+            sanitized[key] = math.floor(number + 0.5)
+            --devPrint(("[sanitizeSnapshot] ✅ Numeric key '%s' = %s (raw=%s)"):format(key, sanitized[key], tostring(original)))
         elseif entry.required then
-            sanitized[entry.key] = entry.default or 0
+            sanitized[key] = entry.default or 0
+            --devPrint(("[sanitizeSnapshot] ℹ️ Missing required key '%s' → defaulted to %s"):format(key, tostring(sanitized[key])))
         else
-            sanitized[entry.key] = nil
+            sanitized[key] = nil
+            --devPrint(("[sanitizeSnapshot] ⏩ Optional key '%s' not provided / invalid"):format(key))
         end
     end
 
@@ -372,33 +308,19 @@ local function sanitizeSnapshot(data)
         local value = data[key]
         if type(value) == 'string' and value ~= '' then
             if #value > 32 then
+                --devPrint(("[sanitizeSnapshot] ⚠️ String key '%s' too long (%d chars) → truncated"):format(key, #value))
                 value = value:sub(1, 32)
             end
             sanitized[key] = value
+            --devPrint(("[sanitizeSnapshot] ✅ String key '%s' = '%s'"):format(key, value))
         else
             sanitized[key] = nil
+            --devPrint(("[sanitizeSnapshot] ⏩ String key '%s' missing or empty"):format(key))
         end
     end
 
+    --devPrint("[sanitizeSnapshot]Sanitization complete, total keys:", tostring(#(NUMERIC_FIELDS) + #(STRING_FIELDS)))
     return sanitized
-end
-
-local function buildSnapshotQuery(columns)
-    local insertColumns = { '`character_id`' }
-    local placeholders = { '?' }
-    local updates = {}
-
-    for _, column in ipairs(columns) do
-        insertColumns[#insertColumns + 1] = '`' .. column .. '`'
-        placeholders[#placeholders + 1] = '?'
-        updates[#updates + 1] = '`' .. column .. '`=VALUES(`' .. column .. '`)' 
-    end
-
-    local insertList = table.concat(insertColumns, ',')
-    local placeholderList = table.concat(placeholders, ',')
-    local updateList = table.concat(updates, ',')
-
-    return 'INSERT INTO `' .. tableName .. '` (' .. insertList .. ') VALUES (' .. placeholderList .. ') ON DUPLICATE KEY UPDATE ' .. updateList
 end
 
 local SNAPSHOT_COLUMNS = {}
@@ -409,44 +331,32 @@ for _, key in ipairs(STRING_FIELDS) do
     SNAPSHOT_COLUMNS[#SNAPSHOT_COLUMNS + 1] = key
 end
 
-local SNAPSHOT_QUERY = buildSnapshotQuery(SNAPSHOT_COLUMNS)
+function PersistSnapshot(characterId, snapshot)
+    local insertColumns = "`character_id`"
+    local placeholders  = "?"
+    local updates       = "`character_id` = VALUES(`character_id`)"
 
-local function persistSnapshot(characterId, snapshot)
-    if not saveEnabled then
-        return true
+    for _, column in ipairs(SNAPSHOT_COLUMNS) do
+        insertColumns = insertColumns .. ", `" .. column .. "`"
+        placeholders  = placeholders .. ", ?"
+        updates       = updates .. ", `" .. column .. "` = VALUES(`" .. column .. "`)"
     end
 
-    if not MySQL or not MySQL.prepare then
-        print('^1[BCC-CoreHUD]^0 oxmysql not loaded; skipping snapshot persistence')
-        return false
-    end
-
+    -- Params
     local params = { characterId }
 
     for _, column in ipairs(SNAPSHOT_COLUMNS) do
         local value = snapshot[column]
-
         local numericMeta = NUMERIC_INDEX[column]
+
         if numericMeta then
             local number = tonumber(value)
-
             if number ~= nil then
-                if numericMeta.min and number < numericMeta.min then
-                    number = numericMeta.min
-                end
-                if numericMeta.max and number > numericMeta.max then
-                    number = numericMeta.max
-                end
-
+                if numericMeta.min and number < numericMeta.min then number = numericMeta.min end
+                if numericMeta.max and number > numericMeta.max then number = numericMeta.max end
                 number = math.floor(number + 0.5)
-
-                if numericMeta.min and number < numericMeta.min then
-                    number = numericMeta.min
-                end
-                if numericMeta.max and number > numericMeta.max then
-                    number = numericMeta.max
-                end
-
+                if numericMeta.min and number < numericMeta.min then number = numericMeta.min end
+                if numericMeta.max and number > numericMeta.max then number = numericMeta.max end
                 value = number
             elseif numericMeta.required then
                 value = numericMeta.default or numericMeta.min or 0
@@ -454,17 +364,13 @@ local function persistSnapshot(characterId, snapshot)
                 value = nil
             end
 
-            if value ~= nil and type(value) ~= 'number' then
-                if debugEnabled then
-                    debugPrint('Invalid numeric payload', column, tostring(value))
-                end
+            if value ~= nil and type(value) ~= "number" then
+                devPrint("Invalid numeric payload", column, tostring(value))
                 value = numericMeta.required and (numericMeta.default or numericMeta.min or 0) or nil
             end
         elseif STRING_INDEX[column] then
-            if type(value) == 'string' and value ~= '' then
-                if #value > 32 then
-                    value = value:sub(1, 32)
-                end
+            if type(value) == "string" and value ~= "" then
+                if #value > 32 then value = value:sub(1, 32) end
             else
                 value = nil
             end
@@ -473,17 +379,12 @@ local function persistSnapshot(characterId, snapshot)
         params[#params + 1] = value
     end
 
-    local ok, err = pcall(function()
-        MySQL.prepare.await(SNAPSHOT_QUERY, params)
-    end)
-
-    if not ok then
-        if debugEnabled and json and json.encode then
-            debugPrint('Snapshot params', json.encode(params))
-        end
-        print('^1[BCC-CoreHUD]^0 Failed to persist snapshot for character ' .. tostring(characterId) .. ': ' .. tostring(err))
-        return false
-    end
+    -- Inline query string inside MySQL call
+    MySQL.query.await(
+        "INSERT INTO `bcc_corehud` (" ..
+        insertColumns .. ") VALUES (" .. placeholders .. ") ON DUPLICATE KEY UPDATE " .. updates,
+        params
+    )
 
     return true
 end
@@ -572,81 +473,6 @@ local function decodeLayout(raw)
     return sanitizeLayout(decoded)
 end
 
-local function persistPalette(characterId, palette)
-    if not saveEnabled then
-        return true
-    end
-
-    if not MySQL or not MySQL.prepare then
-        print('^1[BCC-CoreHUD]^0 oxmysql not loaded; skipping palette persistence')
-        return false
-    end
-
-    local encoded = json.encode(palette)
-    local query = 'INSERT INTO `' .. tableName .. '` (`character_id`, `palette_json`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `palette_json` = VALUES(`palette_json`)' 
-
-    local ok, err = pcall(function()
-        MySQL.prepare.await(query, { characterId, encoded })
-    end)
-
-    if not ok then
-        print('^1[BCC-CoreHUD]^0 Failed to persist palette for character ' .. tostring(characterId) .. ': ' .. tostring(err))
-        return false
-    end
-
-    return true
-end
-
-local function persistLayout(characterId, layout)
-    if not saveEnabled then
-        return true
-    end
-
-    if not MySQL or not MySQL.prepare then
-        print('^1[BCC-CoreHUD]^0 oxmysql not loaded; skipping layout persistence')
-        return false
-    end
-
-    local encoded = layout and json.encode(layout) or nil
-    local query = 'INSERT INTO `' .. tableName .. '` (`character_id`, `layout_json`) VALUES (?, ?) ON DUPLICATE KEY UPDATE `layout_json` = VALUES(`layout_json`)' 
-
-    local ok, err = pcall(function()
-        MySQL.prepare.await(query, { characterId, encoded })
-    end)
-
-    if not ok then
-        print('^1[BCC-CoreHUD]^0 Failed to persist layout for character ' .. tostring(characterId) .. ': ' .. tostring(err))
-        return false
-    end
-
-    return true
-end
-
-local function loadCharacterRecord(characterId)
-    if not saveEnabled then
-        return nil
-    end
-
-    if not MySQL or not MySQL.query then
-        return nil
-    end
-
-    local ok, rows = pcall(function()
-        return MySQL.query.await('SELECT * FROM `' .. tableName .. '` WHERE `character_id`=? LIMIT 1', { characterId })
-    end)
-
-    if not ok then
-        print('^1[BCC-CoreHUD]^0 Failed to fetch snapshot for character ' .. tostring(characterId) .. ': ' .. tostring(rows))
-        return nil
-    end
-
-    if not rows or not rows[1] then
-        return nil
-    end
-
-    return rows[1]
-end
-
 local function pushNeedsToClient(src, needs)
     if not src or not needs then
         return
@@ -717,41 +543,69 @@ local function getCharacterNeedsWithFallback(characterId)
     }
 end
 
-local function handleSnapshotEvent(src, characterId, payload)
-    if not characterId then
+BccUtils.RPC:Register('bcc-corehud:saveCores', function(params, cb, src)
+    local payload = params and params.payload
+
+    if type(payload) ~= 'table' then
+        cb(false)
+        devPrint('[bcc-corehud:saveCores] bad_payload')
         return
     end
+
+    local user = VorpCore.getUser(src)
+    if not user then
+        cb(false)
+        devPrint('[bcc-corehud:saveCores] no_user')
+        return
+    end
+
+    local character = user.getUsedCharacter
+    if not character or not character.charIdentifier then
+        cb(false)
+        devPrint('[bcc-corehud:saveCores] no_character')
+        return
+    end
+
+    local characterId = character.charIdentifier
+    if not characterId or characterId == "" then
+        cb(false)
+        devPrint("Missing or empty characterId, aborting snapshot handling")
+        return
+    end
+
+    if not payload or type(payload) ~= "table" then
+        cb(false)
+        devPrint("Invalid or missing payload (type: " .. tostring(type(payload)) .. ")")
+        return
+    end
+
     linkSourceToCharacter(src, characterId)
 
     local sanitized = sanitizeSnapshot(payload)
     if not sanitized then
-        debugPrint('snapshot payload invalid for', characterId)
+        cb(false)
+        devPrint(("Snapshot payload invalid for characterId=%s"):format(tostring(characterId)))
         return
     end
+
+    local numKeys = 0
+    for _ in pairs(sanitized) do numKeys = numKeys + 1 end
 
     ensurePlayerState(src).snapshot = sanitized
     updateNeedsFromSnapshot(characterId, payload)
 
-    if persistSnapshot(characterId, sanitized) then
-        debugPrint('snapshot stored for', characterId)
+    devPrint("Persisting snapshot to database...")
+    if PersistSnapshot(characterId, sanitized) then
+        devPrint(("Snapshot stored successfully for characterId=%s"):format(tostring(characterId)))
+    else
+        devPrint(("Snapshot persistence failed for characterId=%s"):format(tostring(characterId)))
     end
-end
 
-RegisterNetEvent('bcc-corehud:saveCores', function(payload)
-    local src = source
-    if type(payload) ~= 'table' then
-        return
-    end
-    withCharacterId(src, 'saveCores', function(characterId)
-        if not GetPlayerName(src) then
-            return
-        end
-        handleSnapshotEvent(src, characterId, payload)
-    end)
+    cb(true)
 end)
 
 local function applyStoredPalette(src, characterId)
-    local row = loadCharacterRecord(characterId)
+    local row = LoadCharacterRecord(characterId)
     if not row then
         return
     end
@@ -761,7 +615,7 @@ local function applyStoredPalette(src, characterId)
     if row.palette_json then
         local ok, decoded = pcall(json.decode, row.palette_json)
         if ok and type(decoded) == 'table' then
-            TriggerClientEvent('bcc-corehud:palette:apply', src, decoded)
+            BccUtils.RPC:Notify('bcc-corehud:palette:apply', { snapshot = decoded }, src)
             state.palette = decoded
         end
     end
@@ -770,12 +624,12 @@ local function applyStoredPalette(src, characterId)
     if not layout then
         layout = sanitizeLayout(cloneDefaultLayout())
         if layout then
-            persistLayout(characterId, layout)
+            PersistLayout(characterId, layout)
         end
     end
     state.layout = layout
-    TriggerClientEvent('bcc-corehud:layout:apply', src, layout)
-
+    BccUtils.RPC:Notify('bcc-corehud:layout:apply', { layout = state.layout }, src)
+    BccUtils.RPC:Notify('bcc-corehud:layout:apply', { layout = layout }, src)
     local storedNeeds = getCharacterNeeds(characterId)
     local needs = {
         hunger = storedNeeds and storedNeeds.hunger or nil,
@@ -797,210 +651,327 @@ local function applyStoredPalette(src, characterId)
     pushNeedsToClient(src, needs)
 end
 
-RegisterNetEvent('bcc-corehud:palette:request', function()
-    local src = source
-
-    withCharacterId(src, 'palette:request', function(characterId)
-        if not GetPlayerName(src) then
-            return
-        end
-
-        linkSourceToCharacter(src, characterId)
-
-        local state = ensurePlayerState(src)
-        if state.palette then
-            TriggerClientEvent('bcc-corehud:palette:apply', src, state.palette)
-            TriggerClientEvent('bcc-corehud:layout:apply', src, state.layout)
-            if state.needs and next(state.needs) then
-                pushNeedsToClient(src, state.needs)
-            end
-            return
-        end
-
-        applyStoredPalette(src, characterId)
-    end)
-end)
-
-RegisterNetEvent('bcc-corehud:palette:save', function(snapshot)
-    local src = source
-
-    withCharacterId(src, 'palette:save', function(characterId)
-        if not GetPlayerName(src) then
-            return
-        end
-
-        linkSourceToCharacter(src, characterId)
-
-        local sanitized = sanitizePalette(snapshot)
-        if not sanitized then
-            debugPrint('palette save invalid payload for', characterId)
-            return
-        end
-
-        ensurePlayerState(src).palette = sanitized
-        TriggerClientEvent('bcc-corehud:palette:apply', src, sanitized)
-
-        if persistPalette(characterId, sanitized) then
-            debugPrint('palette stored for', characterId)
-        end
-    end)
-end)
-
-RegisterNetEvent('bcc-corehud:layout:request', function()
-    local src = source
-
-    withCharacterId(src, 'layout:request', function(characterId)
-        if not GetPlayerName(src) then
-            return
-        end
-
-        linkSourceToCharacter(src, characterId)
-
-        local state = ensurePlayerState(src)
-        if state.layout then
-            TriggerClientEvent('bcc-corehud:layout:apply', src, state.layout)
-            return
-        end
-
-        local layout = nil
-        local row = loadCharacterRecord(characterId)
-        if row then
-            layout = decodeLayout(row.layout_json)
-        end
-
-        if not layout then
-            layout = sanitizeLayout(cloneDefaultLayout())
-            if layout then
-                persistLayout(characterId, layout)
-            end
-        end
-
-        state.layout = layout
-        TriggerClientEvent('bcc-corehud:layout:apply', src, layout)
-    end)
-end)
-
-RegisterNetEvent('bcc-corehud:layout:save', function(payload)
-    local src = source
-    if type(payload) ~= 'table' then
+BccUtils.RPC:Register('bcc-corehud:palette:request', function(params, cb, src)
+    local user = VorpCore.getUser(src)
+    if not user then
+        devPrint('[palette:request] no_user', src)
+        cb(false)
         return
     end
 
-    withCharacterId(src, 'layout:save', function(characterId)
-        if not GetPlayerName(src) then
-            return
+    local character = user.getUsedCharacter
+    if not character or not character.charIdentifier then
+        devPrint('[palette:request] no_character', src)
+        cb(false)
+        return
+    end
+
+    local characterId = character.charIdentifier
+    linkSourceToCharacter(src, characterId)
+
+    local state = ensurePlayerState(src)
+    if state.palette then
+        BccUtils.RPC:Notify('bcc-corehud:palette:apply', { snapshot = state.palette }, src)
+        BccUtils.RPC:Notify('bcc-corehud:layout:apply', { layout = state.layout }, src)
+        if state.needs and next(state.needs) then
+            pushNeedsToClient(src, state.needs)
         end
 
-        linkSourceToCharacter(src, characterId)
+        cb(true)
+        return
+    end
 
-        local sanitized = sanitizeLayout(payload)
-        local state = ensurePlayerState(src)
-        state.layout = sanitized
-
-        TriggerClientEvent('bcc-corehud:layout:apply', src, sanitized)
-
-        if persistLayout(characterId, sanitized) then
-            debugPrint('layout stored for', characterId)
-        end
-    end)
+    applyStoredPalette(src, characterId)
+    cb(true)
 end)
 
-RegisterNetEvent('bcc-corehud:layout:reset', function()
-    local src = source
+BccUtils.RPC:Register('bcc-corehud:palette:save', function(params, cb, src)
+    local snapshot = params and params.snapshot
 
-    withCharacterId(src, 'layout:reset', function(characterId)
-        if not GetPlayerName(src) then
-            return
+    if type(snapshot) ~= 'table' then
+        cb(false)
+        devPrint('[palette:save] bad_payload')
+        return
+    end
+
+    local user = VorpCore.getUser(src)
+    if not user then
+        cb(false)
+        devPrint('[palette:save] no_user')
+        return
+    end
+
+    local character = user.getUsedCharacter
+    if not character or not character.charIdentifier then
+        cb(false)
+        devPrint('[palette:save] no_character')
+        return
+    end
+
+    local characterId = character.charIdentifier
+    linkSourceToCharacter(src, characterId)
+
+    local sanitized = sanitizePalette(snapshot)
+    if not sanitized then
+        cb(false)
+        devPrint('[palette:save] invalid_payload')
+        return
+    end
+
+    ensurePlayerState(src).palette = sanitized
+    BccUtils.RPC:Notify('bcc-corehud:palette:apply', { snapshot = sanitized }, src)
+
+    if PersistPalette(characterId, sanitized) then
+        devPrint('[palette:save] stored for', characterId)
+    end
+
+    cb(true)
+end)
+
+BccUtils.RPC:Register('bcc-corehud:layout:request', function(params, cb, src)
+    local user = VorpCore.getUser(src)
+    if not user then
+        devPrint('[layout:request] no_user', src)
+        cb(false)
+        return
+    end
+
+    local character = user.getUsedCharacter
+    if not character or not character.charIdentifier then
+        devPrint('[layout:request] no_character', src)
+        cb(false)
+        return
+    end
+
+    local characterId = character.charIdentifier
+    linkSourceToCharacter(src, characterId)
+
+    local state = ensurePlayerState(src)
+    if state.layout then
+        BccUtils.RPC:Notify('bcc-corehud:layout:apply', { layout = state.layout }, src)
+        cb(true)
+        return
+    end
+
+    local layout
+    local row = LoadCharacterRecord(characterId)
+    if row then
+        layout = decodeLayout(row.layout_json)
+    end
+
+    if not layout then
+        layout = sanitizeLayout(cloneDefaultLayout())
+        if layout then
+            PersistLayout(characterId, layout)
         end
+    end
 
-        linkSourceToCharacter(src, characterId)
+    state.layout = layout
+    BccUtils.RPC:Notify('bcc-corehud:layout:apply', { layout = layout }, src)
+    cb(true)
+end)
 
-        local state = ensurePlayerState(src)
-        state.layout = nil
+-- Save layout RPC
+BccUtils.RPC:Register('bcc-corehud:layout:save', function(params, cb, src)
+    local payload = params and params.layout
+    if type(payload) ~= 'table' then
+        cb(false)
+        devPrint('[layout:save] bad_payload', src)
+        return
+    end
 
-        TriggerClientEvent('bcc-corehud:layout:apply', src, nil)
+    local user = VorpCore.getUser(src)
+    if not user then
+        cb(false)
+        devPrint('[layout:save] no_user', src)
+        return
+    end
 
-        if persistLayout(characterId, nil) then
-            debugPrint('layout reset for', characterId)
-        end
-    end)
+    local character = user.getUsedCharacter
+    if not character or not character.charIdentifier then
+        cb(false)
+        devPrint('[layout:save] no_character', src)
+        return
+    end
+
+    local characterId = character.charIdentifier
+    linkSourceToCharacter(src, characterId)
+
+    local sanitized = sanitizeLayout(payload)
+    local state = ensurePlayerState(src)
+    state.layout = sanitized
+
+    BccUtils.RPC:Notify('bcc-corehud:layout:apply', { layout = sanitized }, src)
+    if PersistLayout(characterId, sanitized) then
+        devPrint('[layout:save] layout stored for', characterId)
+    end
+
+    cb(true)
+end)
+
+BccUtils.RPC:Register('bcc-corehud:layout:reset', function(params, cb, src)
+    local user = VorpCore.getUser(src)
+    if not user then
+        cb(false)
+        devPrint('[layout:reset] no_user', src)
+        return
+    end
+
+    local character = user.getUsedCharacter
+    if not character or not character.charIdentifier then
+        cb(false)
+        devPrint('[layout:reset] no_character', src)
+        return
+    end
+
+    local characterId = character.charIdentifier
+    linkSourceToCharacter(src, characterId)
+
+    local state = ensurePlayerState(src)
+    state.layout = nil
+    BccUtils.RPC:Notify('bcc-corehud:layout:apply', {}, src)
+
+    if PersistLayout(characterId, nil) then
+        devPrint('[layout:reset] layout reset for', characterId)
+    end
+
+    cb(true)
 end)
 
 AddEventHandler('playerDropped', function()
     local src = source
-    local state = playerStates[src]
-    if not state then
-        return
-    end
-    if state.characterId then
-        if characterSources[state.characterId] == src then
-            characterSources[state.characterId] = nil
-        end
-    end
-    playerStates[src] = nil
-    pendingCharacterRequests[src] = nil
+    clearSourceState(src)
 end)
 
-local function resolveCharacterIdInput(target)
-    if target == nil then
-        return nil
-    end
+RegisterNetEvent('bcc-corehud:clientStopped', function()
+    clearSourceState(source)
+end)
 
+-- GetPlayerNeeds
+exports('GetPlayerNeeds', function(target)
+    if target == nil then return nil end
+
+    local characterId
     if type(target) == 'number' then
         local src = target
-        if GetPlayerName(src) then
-            return getCharacterId(src)
+
+        local user = VorpCore.getUser(src)
+        if not user then return nil end
+
+        local character = user.getUsedCharacter
+        if not character then return nil end
+
+        local identifier = character.charIdentifier
+        if identifier == nil and type(character.charid) ~= 'nil' then
+            identifier = character.charid
         end
-        return nil
+        if identifier == nil then return nil end
+
+        characterId = tostring(identifier)
+    else
+        characterId = tostring(target)
     end
 
-    return tostring(target)
-end
-
-exports('GetPlayerNeeds', function(target)
-    local characterId = resolveCharacterIdInput(target)
-    if not characterId then
-        return nil
-    end
     return getCharacterNeedsWithFallback(characterId)
 end)
 
+-- GetPlayerNeed
 exports('GetPlayerNeed', function(target, stat)
-    local characterId = resolveCharacterIdInput(target)
-    if not characterId then
-        return nil
+    if target == nil then return nil end
+
+    local characterId
+    if type(target) == 'number' then
+        local src = target
+
+        local user = VorpCore.getUser(src)
+        if not user then return nil end
+
+        local character = user.getUsedCharacter
+        if not character then return nil end
+
+        local identifier = character.charIdentifier
+        if identifier == nil and type(character.charid) ~= 'nil' then
+            identifier = character.charid
+        end
+        if identifier == nil then return nil end
+
+        characterId = tostring(identifier)
+    else
+        characterId = tostring(target)
     end
+
     stat = stat and stat:lower() or nil
     local needs = getCharacterNeeds(characterId)
-    if not needs then
-        return defaultNeedValue
-    end
+    if not needs then return defaultNeedValue end
+
     local value = needs[stat]
-    if value == nil then
-        return defaultNeedValue
-    end
+    if value == nil then return defaultNeedValue end
     return value
 end)
 
+-- SetPlayerNeed
 exports('SetPlayerNeed', function(target, stat, value)
-    local characterId = resolveCharacterIdInput(target)
-    if not characterId then
-        return nil
+    if target == nil then return nil end
+
+    local characterId
+    if type(target) == 'number' then
+        local src = target
+
+        local user = VorpCore.getUser(src)
+        if not user then return nil end
+
+        local character = user.getUsedCharacter
+        if not character then return nil end
+
+        local identifier = character.charIdentifier
+        if identifier == nil and type(character.charid) ~= 'nil' then
+            identifier = character.charid
+        end
+        if identifier == nil then return nil end
+
+        characterId = tostring(identifier)
+    else
+        characterId = tostring(target)
     end
+
     return setCharacterNeed(characterId, stat, value)
 end)
 
+-- AddPlayerNeed
 exports('AddPlayerNeed', function(target, stat, delta)
-    local characterId = resolveCharacterIdInput(target)
-    if not characterId then
-        return nil
+    if target == nil then return nil end
+
+    local characterId
+    if type(target) == 'number' then
+        local src = target
+
+        local user = VorpCore.getUser(src)
+        if not user then return nil end
+
+        local character = user.getUsedCharacter
+        if not character then return nil end
+
+        local identifier = character.charIdentifier
+        if identifier == nil and type(character.charid) ~= 'nil' then
+            identifier = character.charid
+        end
+        if identifier == nil then return nil end
+
+        characterId = tostring(identifier)
+    else
+        characterId = tostring(target)
     end
+
     stat = stat and stat:lower() or nil
     return addCharacterNeed(characterId, stat, delta)
 end)
 
 local function applyNeedModifiers(src, modifiers)
-    local characterId = getCharacterId(src)
+    local user = VorpCore.getUser(src)
+    if not user then return end
+    local character = user.getUsedCharacter
+    if not character then return nil end
+    local characterId = character.charIdentifier
     if not characterId then
         return
     end
@@ -1021,7 +992,7 @@ end
 
 local function registerNeedItems()
     if not exports or not exports.vorp_inventory then
-        print('^3[BCC-CoreHUD]^0 vorp_inventory export missing; skipping need item registration')
+        devPrint('^3[BCC-CoreHUD]^0 vorp_inventory export missing; skipping need item registration')
         return
     end
 
@@ -1094,7 +1065,7 @@ local function registerNeedItems()
                 if #overpower > 0 then
                     TriggerClientEvent('bcc-corehud:applyAttributeOverpower', src, overpower)
                 end
-            end)
+            end, GetCurrentResourceName())
         end
     end
 end
@@ -1107,7 +1078,7 @@ end)
 -- Keep money/gold/xp/tokens in sync whenever VORP updates the Character state bag.
 AddStateBagChangeHandler('Character', nil, function(bagName, key, value)
     local src = sourceFromStateBagName(bagName)
-    if not src or not GetPlayerName(src) then
+    if not src then
         return
     end
 
@@ -1121,11 +1092,13 @@ AddStateBagChangeHandler('Character', nil, function(bagName, key, value)
     syncBalancesFromState(src, value)
 end)
 
-local function toNum(v) v = tonumber(v); return (v and v == v) and v or 0 end
+local function toNum(v)
+    v = tonumber(v); return (v and v == v) and v or 0
+end
 
 BccUtils.RPC:Register('bcc-corehud:getBalances', function(params, cb, src)
     local target = tonumber(params and params.targetId) or src
-    if not target or not GetPlayerName(target) then
+    if not target then
         cb({ ok = false, message = 'Target not online' })
         return
     end
@@ -1136,23 +1109,23 @@ BccUtils.RPC:Register('bcc-corehud:getBalances', function(params, cb, src)
         return
     end
 
-    local user = getUser(target)
+    local user = VorpCore.getUser(target)
     if not user then
         cb({ ok = false, message = 'User not found' })
         return
     end
 
-    local character = getCharacterFromUser(user)
+    local character = user.getUsedCharacter
     if not character then
         cb({ ok = false, message = 'Character not found' })
         return
     end
 
     local data = {
-        money = toNum(character.money),
-        gold  = toNum(character.gold),
-        rol   = toNum(character.rol), -- we map this to HUD "tokens"
-        xp    = toNum(character.xp),
+        money  = toNum(character.money),
+        gold   = toNum(character.gold),
+        rol    = toNum(character.rol),
+        xp     = toNum(character.xp),
         target = target
     }
 

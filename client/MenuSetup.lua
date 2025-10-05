@@ -19,7 +19,6 @@ local CORE_KEYS = {
     { key = 'voice',         label = 'Voice' },
 }
 local LAST_PALETTE_SNAPSHOT = nil
-local FIRST_SPAWN_DONE = false
 
 local function clamp(v, lo, hi)
     v = tonumber(v) or 0; if v < lo then return lo end; if v > hi then return hi end; return v
@@ -129,14 +128,16 @@ local function pushPaletteToHud(snapshot)
 end
 
 local function requestPaletteFromServer()
-    TriggerServerEvent('bcc-corehud:palette:request')
-end
+    local result = BccUtils.RPC:CallAsync('bcc-corehud:palette:request', {})
 
--- Server -> Client: apply saved palette (already exists on your server)
-RegisterNetEvent('bcc-corehud:palette:apply', function(snapshot)
-    -- remember + push to HUD
-    pushPaletteToHud(snapshot)
-end)
+    if not result then
+        devPrint('[bcc-corehud:palette:request] RPC failed or returned false')
+        return false
+    end
+
+    devPrint('[bcc-corehud:palette:request] RPC completed successfully')
+    return true
+end
 
 -- Ask once when the resource starts (handles resource reloads)
 AddEventHandler('onClientResourceStart', function(res)
@@ -149,16 +150,6 @@ AddEventHandler('onClientResourceStart', function(res)
     end
 end)
 
--- Ask again on first spawn (covers fresh login/character select)
-AddEventHandler('playerSpawned', function()
-    if not FIRST_SPAWN_DONE then
-        FIRST_SPAWN_DONE = true
-        requestPaletteFromServer()
-    end
-end)
-
--- Optional: if your UI sends a "ready" ping after it reloads, re-send the last palette
--- Hook your NUI to call: fetch('https://<resource>/paletteReady', { method:'POST' })
 RegisterNUICallback('paletteReady', function(_, cb)
     if LAST_PALETTE_SNAPSHOT then
         pushPaletteToHud(LAST_PALETTE_SNAPSHOT)
@@ -214,7 +205,17 @@ local function getSnapshot()
 end
 
 local function savePalette(reason)
-    TriggerServerEvent('bcc-corehud:palette:save', getSnapshot(), reason)
+    local snapshot = getSnapshot()
+    local ok = BccUtils.RPC:CallAsync('bcc-corehud:palette:save', {
+        snapshot = snapshot,
+        reason = reason or 'manual_save'
+    })
+
+    if not ok then
+        devPrint('[bcc-corehud:palette:save] RPC failed or rejected')
+    else
+        devPrint('[bcc-corehud:palette:save] RPC success')
+    end
 end
 
 local function applyPreset(preset, shouldSave)
@@ -231,19 +232,28 @@ local function applyPreset(preset, shouldSave)
     if shouldSave then savePalette('preset') end
 end
 
--- Called when server pushes saved palette
-RegisterNetEvent('bcc-corehud:palette:apply', function(snapshot)
-    if type(snapshot) == 'table' then
-        for _, spec in ipairs(CORE_KEYS) do
-            local k = spec.key
-            local src = snapshot[k]
-            if type(src) == 'table' then
-                setHue(k, src.hue, true)
-                setSaturation(k, src.saturation, true)
-            end
-        end
-        sendPaletteToNui()
+BccUtils.RPC:Register('bcc-corehud:palette:apply', function(params, cb)
+    local snapshot = params and (params.snapshot or params)
+    if type(snapshot) ~= 'table' then
+        if cb then cb(false) end
+        devPrint('[palette:apply] bad_payload')
+        return
     end
+
+    -- apply inline
+    for _, spec in ipairs(CORE_KEYS) do
+        local k   = spec.key
+        local src = snapshot[k]
+        if type(src) == 'table' then
+            setHue(k, tonumber(src.hue) or 0, true)         -- reflect sliders
+            setSaturation(k, tonumber(src.saturation) or 0, true)
+        end
+    end
+
+    LAST_PALETTE_SNAPSHOT = getSnapshot() -- cache normalized
+    sendPaletteToNui()                    -- build from PALETTE
+
+    if cb then cb(true) end
 end)
 
 -- ---------- live drag watcher ----------

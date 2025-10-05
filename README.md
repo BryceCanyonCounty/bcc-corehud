@@ -87,7 +87,7 @@ Add the new file to `shared/config/needitems/`, and the manifest will load it au
 ### Layout editor
 
 1. `/hudlayout` enables grid + drag handles.
-2. Move components, `/hudlayout` again (or `Esc`) to save/exit.
+2. Move components and Save Layout near map.
 3. `/hudlayout reset` clears saved positions for the current character.
 
 ## Integrations & Events
@@ -102,28 +102,8 @@ exports['bcc-corehud']:SetNeeds({ hunger = 75, thirst = 60, stress = 20 })
 exports['bcc-corehud']:SetNeed('hunger', 42)
 
 -- Increment a stat (hunger / thirst / stress / clean_stats)
-exports['bcc-corehud']:AddNeed('clean_stats', -10)
+exports['bcc-corehud']:AddNeed('clean_stats', 100)
 ```
-
-### Client events
-
-| Event | Payload | Purpose |
-|-------|---------|---------|
-| `bcc-corehud:setNeeds` | `{ hunger, thirst, stress }` | Replace current need state. |
-| `bcc-corehud:setNeed` | `(stat, value)` | Update a single need value. |
-| `bcc-corehud:setStaminaCore` | `amount` | Additive stamina core boost (ignored when ≤ 0). |
-| `bcc-corehud:setHealthCore` | `amount` | Additive health core boost (ignored when ≤ 0). |
-| `bcc-corehud:applyAttributeOverpower` | `{ { attribute, amount }, ... }` | Apply golden core overpower buffs. |
-| `bcc-corehud:playConsumeAnim` | `table` | Trigger configured consume animation/prop. |
-
-### Server helpers
-
-| Event/Export | Purpose |
-|--------------|---------|
-| `TriggerClientEvent('bcc-corehud:layout:apply', src, positions)` | Push layout positions to a client. |
-| `TriggerClientEvent('bcc-corehud:palette:apply', src, snapshot)` | Push palette snapshot. |
-| `exports['bcc-corehud']:SetPlayerNeed(target, stat, value)` | Set a single need on the server (persists). |
-| `exports['bcc-corehud']:AddPlayerNeed(target, stat, delta)` | Adjust a need delta on the server. |
 
 ## Development workflow
 

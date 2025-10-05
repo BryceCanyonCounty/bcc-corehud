@@ -1,50 +1,10 @@
-<1.5.1>
-- updated fxmanifest
-<1.5.0>
-## Changelog
-
-- **Palette Persistence**
-  - Converted `oxmysql`-driven palette persistence to accept all palette keys.
-  - Ensured palettes are stored and loaded correctly.
-
-- **Core Attribute Updates**
-  - Added setters for health and stamina cores.
-  - Implemented gold "overpower" boosts via `EnableAttributeOverpower`.
-  - Wired overpower boosts to the `NeedItems` config.
-
-- **NeedItems Config Refactor**
-  - Broke `Config.NeedItems` into modular files: `shared/config/needitems/*.lua`.
-  - Added the `AddNeedItems` helper function.
-  - Populated entries with new `health` and `gold` fields.
-
-- **Native Function Improvements**
-  - Replaced raw native hashes with their CFX helper equivalents:
-    - `StartNetworkedParticleFxLoopedOnEntityBone`
-    - `UseParticleFxAsset`
-    - `HasNamedPtfxAssetLoaded`
-    - `GetAttributeBaseRank`
-    - etc.
-
-- **Cleanliness Logic**
-  - Adjusted logic so warnings only trigger after cleanliness drops below `Config.MinCleanliness`.
-  - Prevented repeated warnings on restart.
-  - FX now attaches using proper male/female model helpers.
-
-- **Consumable Core Handling**
-  - Made core updates additive.
-  - Ignored zero values (e.g., `stamina = 0` leaves core untouched).
-
-- **General Refactoring**
-  - Removed `pcall` wrappers around native calls.
-  - Cleaned up formatting and string concatenation.
-  - Updated manifest to ensure new shared config files are loaded.
-
-<1.4.0>
-- **Prop-driven eat/drink animations** for consumables (server & client plumbing).
-- **Cleanliness percentage mapping fixed** and dirt-fly effects now trigger correctly.
-- **Localized toast** displayed when cycling **voice proximity**.
-- **All chat commands configurable** (or disable-able) via `config.lua`.
-- **Version file** introduced for the resource.
-- **Inventory auto-closes** after using a need item (removed per-item toggle).
-- **Always register need items** (removed `Config.RegisterNeedItems`).
-- **Misc cleanups:** persistence always targets `bcc_corehud`, server debug respects `Config.devMode`, docs updated.
+<1.6.0>
+- Updated activity multiplier to tick every second  
+- Added smoke effects — credits to **HerosTicWorld** ([heros_tobacco](https://github.com/HerosTicWorld/heros_tobacco))  
+- Added missing localizations  
+- Moved several events to **BccUtils RPC**  
+- Fixed palette not loading after restart or when player logs in  
+- Added extra check for when `UiAppsActive`  
+- Fixed update intervals to remove delay when showing draining cores  
+- Removed redundant config code  
+- Various other fixes and performance improvements  

@@ -19,22 +19,23 @@ client_scripts {
     'client/utilities.lua',
     'client/functions.lua',
     'client/MenuSetup.lua',
+    'client/smokes.lua',
     'client/client.lua'
 }
 
 server_script {
     '@oxmysql/lib/MySQL.lua',
     'server/dbUpdater.lua',
+    'server/controllers.lua',
+    'server/functions.lua',
     'server/server.lua'
 }
 
-ui_page {
-    "ui/index.html"
-}
+ui_page 'ui/index.html'
 
 files {
     "ui/index.html",
     "ui/**/*"
 }
 
-version '1.5.1'
+version '1.6.0'
