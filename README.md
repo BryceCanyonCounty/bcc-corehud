@@ -1,6 +1,7 @@
-# BCC Core HUD
+# BCC CoreHUD — Full Modern HUD & Metabolism for RedM
 
-An opinionated RedM HUD for player, mount, voice, temperature and cleanliness telemetry with a Vue 3/Tailwind SPA front end. The resource includes layout and palette editors, oxmysql persistence, additive core buffs, consumable helpers and optional auto-decay for hunger/thirst.
+An opinionated, all-in-one modern RedM HUD and metabolism system with a Vue 3/Tailwind SPA front end.
+Provides a full, modern HUD and complete metabolism stack — player & mount telemetry, consumables, needs decay, stress, temperature and cleanliness systems — plus in-game layout & palette editors and oxmysql-backed persistence.
 
 > **Quick start:** drop the resource in `resources/[BCC]/bcc-corehud`, ensure `oxmysql`, `vorp_core`, `vorp_inventory`, `bcc-utils`, and `feather-menu`, then `ensure bcc-corehud`.
 
@@ -42,7 +43,7 @@ When running `vorp_core`, disable its default gold/money/token/id displays so bc
 
 With VORP’s HUD hidden, keep the corresponding cores enabled in `bcc-corehud` (money, gold, experience, tokens, player ID) so they remain visible to players.
 
-> **Heads-up:** You don’t need `vorp_metabolism`. bcc-corehud already handles needs persistence, optional auto-decay, consumable helpers, temperature/stress effects, and UI layout/palette tools—everything you need for a richer metabolism experience.
+> **Heads-up:** You don’t need `vorp_metabolism` or `fred-metabolism`. bcc-corehud already handles needs persistence, optional auto-decay, consumable helpers, temperature/stress effects, and UI layout/palette tools—everything you need for a richer metabolism experience.
 
 ## Installation
 
