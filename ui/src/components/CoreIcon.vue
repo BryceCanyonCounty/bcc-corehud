@@ -18,7 +18,7 @@ const ICON_CLASS_MAP = {
   stamina: 'fa-solid fa-bolt',
   hunger: 'fa-solid fa-apple-whole',
   thirst: 'fa-solid fa-bottle-water',
-  stress: 'fa-solid fa-face-tired',
+  stress: null,
   messages: 'fa-solid fa-envelope',
   clean_stats: 'fa-solid fa-soap',
   money: null,
@@ -37,6 +37,8 @@ const ICON_CLASS_MAP = {
 
 const STAT_TYPES = new Set(['money', 'gold', 'exp', 'tokens', 'player_id'])
 const ICONLESS_TYPES = new Set(['messages', 'clean_stats', 'logo'])
+const PULSE_TYPES = new Set(['stamina', 'hunger', 'thirst', 'stress', 'clean_stats'])
+const PULSE_EFFECTS = new Set(['starving', 'parched', 'stressed', 'drained', 'dirty'])
 
 const ICON_IMAGE_MAP = {
   money: {
@@ -192,6 +194,21 @@ const iconClass = computed(() => {
     return null
   }
 
+  if (props.type === 'stress') {
+    const outerValue = Number(props.outer)
+    if (Number.isFinite(outerValue)) {
+      const percent = Math.max(0, Math.min(outerValue, 99)) / 99 * 100
+      if (percent >= 75) {
+        return 'fa-solid fa-face-smile'
+      }
+      if (percent >= 50) {
+        return 'fa-solid fa-face-meh'
+      }
+      return 'fa-solid fa-face-frown'
+    }
+    return 'fa-solid fa-face-meh'
+  }
+
   const entry = ICON_CLASS_MAP[props.type]
   if (entry === null) {
     return null
@@ -292,10 +309,45 @@ const iconColor = computed(() => {
   return paletteEntry.value.icon
 })
 
+const clampPercent = (value, max) => {
+  const numeric = typeof value === 'number' ? value : 0
+  const clamped = Math.max(0, Math.min(numeric, max))
+  return (clamped / max) * 100
+}
+
+const outerPercent = computed(() => clampPercent(props.outer, 99))
+const innerPercent = computed(() => clampPercent(props.inner, 15))
+
+const shouldPulse = computed(() => {
+  if (!PULSE_TYPES.has(props.type)) {
+    return false
+  }
+
+  const effect = typeof props.effectInside === 'string' ? props.effectInside.toLowerCase() : null
+  if (effect && PULSE_EFFECTS.has(effect)) {
+    return true
+  }
+
+  const percent = outerPercent.value
+  if (percent === null) {
+    return false
+  }
+
+  const pulseMeta = props.meta && typeof props.meta === 'object' ? props.meta : null
+  const thresholdValue = pulseMeta && typeof pulseMeta.pulseThreshold === 'number'
+    ? pulseMeta.pulseThreshold
+    : (props.type === 'clean_stats' ? 40 : 25)
+  const threshold = Math.max(0, Math.min(Number(thresholdValue) || 0, 100))
+  return percent <= threshold
+})
+
 const coreSlotClasses = computed(() => {
   const classes = ['core-slot']
   if (props.type === 'voice' && voiceMeta.value?.talking) {
     classes.push('core-slot--voice-talking')
+  }
+  if (shouldPulse.value) {
+    classes.push('core-slot--pulse')
   }
   if (props.type === 'logo') {
     classes.push('core-slot--logo')
@@ -308,15 +360,6 @@ const coreSlotClasses = computed(() => {
   }
   return classes
 })
-
-const clampPercent = (value, max) => {
-  const numeric = typeof value === 'number' ? value : 0
-  const clamped = Math.max(0, Math.min(numeric, max))
-  return (clamped / max) * 100
-}
-
-const outerPercent = computed(() => clampPercent(props.outer, 99))
-const innerPercent = computed(() => clampPercent(props.inner, 15))
 
 const outerDashOffset = computed(
   () => ((100 - outerPercent.value) / 100) * OUTER_CIRCUMFERENCE
@@ -417,7 +460,8 @@ const statValue = computed(() => {
   --inner-border: #1f2937;
 }
 
-.core-slot--voice-talking {
+.core-slot--voice-talking,
+.core-slot--pulse {
   animation: voicePulse 1.05s ease-in-out infinite;
 }
 

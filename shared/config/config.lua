@@ -29,6 +29,30 @@ Config.ActivityMultipliers      = {
 }
 Config.InitialNeedValue         = 100.0        -- Default hunger/thirst value applied on spawn when using local decay
 
+Config.StressSettings           = {
+    enabled                 = true,
+    minimumSpeedMph         = 35.0,
+    speedCheckIntervalMs    = 2000,
+    speedStressMin          = 1,
+    speedStressMax          = 3,
+    shootingEnabled         = true,
+    shootingCheckIntervalMs = 250,
+    shootingStressChance    = 0.25,
+    shootingStressMin       = 1,
+    shootingStressMax       = 3,
+    effectMinimumSeverity   = 25.0,
+    effectCooldownMs        = 3000,
+    ragdollSeverity         = 85.0,
+    ragdollCooldownMs       = 7000,
+    shakeIntensityMin       = 0.05,
+    shakeIntensityMax       = 0.35,
+    damageEnabled           = true,
+    damageSeverityThreshold = 85.0,
+    damageDelayMinutes      = 60.0,
+    damageTickIntervalMs    = 15000,
+    damageAmount            = 3
+}
+
 -- Simple temperature health/thirst damage
 Config.MinTemp                  = -5.0                                   -- Temperatures below this deal health damage each HUD tick
 Config.MaxTemp                  = 31.0                                   -- Temperatures above this deal health damage each HUD tick

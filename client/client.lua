@@ -92,6 +92,18 @@ local logoImage = Config.LogoImage
 
 local mailboxCount, lastMailboxRequest = nil, 0
 
+CreateThread(function()
+	local lp = LocalPlayer
+	while not lp or not lp.state do
+		Wait(100)
+		lp = LocalPlayer
+	end
+
+	if lp.state.IsInvActive == nil then
+		lp.state:set('IsInvActive', false, true)
+	end
+end)
+
 -- =======================
 -- UI/Layout helpers (kept)
 -- =======================
@@ -150,6 +162,28 @@ local starvationTimer, starvationElapsed, starvationDelaySatisfied = 0.0, 0.0, f
 local needsErrorLogged, voiceErrorLogged = false, false
 
 local tempFxActive = false
+
+local stressSettings = type(Config.StressSettings) == 'table' and Config.StressSettings or {}
+local stressSystemEnabled = stressSettings.enabled ~= false
+
+local function randomInRange(minVal, maxVal)
+	local a = math.floor(tonumber(minVal) or 0)
+	local b = math.floor(tonumber(maxVal) or a)
+	if b < a then a, b = b, a end
+	return math.random(a, b)
+end
+
+local function currentStressValue()
+	local value = tonumber(localNeedsState.stress)
+	if value == nil then return nil end
+	return clamp(value, 0.0, 100.0)
+end
+
+local function currentStressSeverity()
+	local calmness = currentStressValue()
+	if calmness == nil then return 0.0 end
+	return clamp(100.0 - calmness, 0.0, 100.0)
+end
 
 local function convertCleanlinessRankToPercent(rank)
 	local value = tonumber(rank)
@@ -794,6 +828,139 @@ local function setLocalNeedValue(stat, value, options)
 	end
 end
 
+local function applyStressDelta(delta)
+	local change = tonumber(delta)
+	if not change or change == 0 then return end
+	local current = tonumber(localNeedsState.stress)
+	if current == nil then
+		current = clamp(tonumber(Config.InitialNeedValue) or 100.0, 0.0, 100.0)
+	end
+	setLocalNeedValue('stress', clamp(current + change, 0.0, 100.0))
+end
+
+local function gainStress(amount)
+	local amt = tonumber(amount)
+	if not amt or amt <= 0 then return end
+	applyStressDelta(-amt)
+end
+
+local function reduceStress(amount)
+	local amt = tonumber(amount)
+	if not amt or amt <= 0 then return end
+	applyStressDelta(amt)
+end
+
+local stressNextSpeedCheck = 0
+local stressNextShootCheck = 0
+local stressNextEffectCheck = 0
+local stressNextRagdollAllowed = 0
+local stressDamageEligibleAt = nil
+local stressNextDamageTick = 0
+
+local function updateStressState(ped, nowMs)
+	if not stressSystemEnabled then return end
+	if ped == 0 or not DoesEntityExist(ped) or IsEntityDead(ped) then return end
+
+	local speedInterval = math.max(100, math.floor(tonumber(stressSettings.speedCheckIntervalMs) or needsIntervalMs or 1000))
+	local speedMinMph = tonumber(stressSettings.minimumSpeedMph) or 0.0
+	local speedGainMin = math.floor(tonumber(stressSettings.speedStressMin) or 1)
+	local speedGainMax = math.floor(tonumber(stressSettings.speedStressMax) or speedGainMin)
+	if speedGainMax < speedGainMin then speedGainMin, speedGainMax = speedGainMax, speedGainMin end
+
+	if speedGainMax > 0 and speedMinMph > 0 and nowMs >= stressNextSpeedCheck then
+		stressNextSpeedCheck = nowMs + speedInterval
+		if IsPedInAnyVehicle(ped, false) then
+			local veh = GetVehiclePedIsIn(ped, false)
+			if veh ~= 0 then
+				local mph = GetEntitySpeed(veh) * 2.236936
+				if mph >= speedMinMph then
+					local gain = randomInRange(speedGainMin, speedGainMax)
+					if gain > 0 then gainStress(gain) end
+				end
+			end
+		end
+	end
+
+	local shootingEnabled = stressSettings.shootingEnabled ~= false
+	local shootInterval = math.max(10, math.floor(tonumber(stressSettings.shootingCheckIntervalMs) or 250))
+	local shootChance = math.max(0.0, math.min(1.0, tonumber(stressSettings.shootingStressChance) or 0.0))
+	local shootGainMin = math.floor(tonumber(stressSettings.shootingStressMin) or 1)
+	local shootGainMax = math.floor(tonumber(stressSettings.shootingStressMax) or shootGainMin)
+	if shootGainMax < shootGainMin then shootGainMin, shootGainMax = shootGainMax, shootGainMin end
+
+	if shootingEnabled and shootGainMax > 0 and nowMs >= stressNextShootCheck then
+		stressNextShootCheck = nowMs + shootInterval
+		if IsPedShooting(ped) then
+			if shootChance >= 1.0 or math.random() < shootChance then
+				local gain = randomInRange(shootGainMin, shootGainMax)
+				if gain > 0 then gainStress(gain) end
+			end
+		end
+	end
+
+	local severity = currentStressSeverity()
+
+	local damageEnabled = stressSettings.damageEnabled ~= false
+	local damageAmount = math.max(0, math.floor(tonumber(stressSettings.damageAmount) or 0))
+	if damageEnabled and damageAmount > 0 then
+		local damageThreshold = math.max(0.0, math.min(100.0, tonumber(stressSettings.damageSeverityThreshold) or 100.0))
+		local damageDelayMinutes = math.max(0.0, tonumber(stressSettings.damageDelayMinutes) or 0.0)
+		local damageDelayMs = math.floor(damageDelayMinutes * 60000.0 + 0.5)
+		local damageInterval = math.max(200, math.floor(tonumber(stressSettings.damageTickIntervalMs) or 10000))
+
+		if severity >= damageThreshold then
+			if not stressDamageEligibleAt then
+				stressDamageEligibleAt = nowMs + damageDelayMs
+			end
+
+			if nowMs >= (stressDamageEligibleAt or 0) and nowMs >= stressNextDamageTick then
+				stressNextDamageTick = nowMs + damageInterval
+				local currentHealth = GetEntityHealth(ped)
+				if currentHealth and currentHealth > 0 then
+					local nextHealth = math.max(0, currentHealth - damageAmount)
+					if nextHealth < currentHealth then
+						SetEntityHealth(ped, nextHealth, 0)
+						if Config.DoHealthPainSound then
+							PlayPain(ped, 9, 1, true, true)
+						end
+					end
+				end
+			end
+		else
+			stressDamageEligibleAt = nil
+			stressNextDamageTick = 0
+		end
+	else
+		stressDamageEligibleAt = nil
+		stressNextDamageTick = 0
+	end
+
+	local effectMinimum = math.max(0.0, tonumber(stressSettings.effectMinimumSeverity) or 999.0)
+	if effectMinimum > 0 then
+		if severity >= effectMinimum and nowMs >= stressNextEffectCheck then
+			local effectCooldown = math.max(200, math.floor(tonumber(stressSettings.effectCooldownMs) or 3000))
+			local ragdollSeverity = math.max(effectMinimum, tonumber(stressSettings.ragdollSeverity) or 100.0)
+			local ragdollCooldown = math.max(500, math.floor(tonumber(stressSettings.ragdollCooldownMs) or 7000))
+			local shakeMin = math.max(0.0, tonumber(stressSettings.shakeIntensityMin) or 0.05)
+			local shakeMax = math.max(shakeMin, tonumber(stressSettings.shakeIntensityMax) or 0.35)
+			local ratio = math.min(severity / 100.0, 1.0)
+			local intensity = shakeMin + (shakeMax - shakeMin) * ratio
+			ShakeGameplayCam('SMALL_EXPLOSION_SHAKE', intensity)
+			stressNextEffectCheck = nowMs + effectCooldown
+			if severity >= ragdollSeverity and nowMs >= stressNextRagdollAllowed then
+				if not IsPedRagdoll(ped) and IsPedOnFoot(ped) and not IsPedSwimming(ped) then
+					SetPedToRagdoll(ped, 2000, 2000, 0, true, true, false)
+				end
+				stressNextRagdollAllowed = nowMs + ragdollCooldown
+			end
+		elseif severity < effectMinimum then
+			stressNextEffectCheck = nowMs
+		end
+	else
+		stressNextEffectCheck = nowMs
+	end
+end
+
 if Config.NeedsAutoDecay then
 	if localNeedsState.hunger == nil then setLocalNeedValue('hunger', Config.InitialNeedValue) end
 	if localNeedsState.thirst == nil then setLocalNeedValue('thirst', Config.InitialNeedValue) end
@@ -1088,6 +1255,8 @@ CreateThread(function()
 
     local dead = (ped ~= 0 and IsEntityDead(ped))
 
+    local inventoryOpen = (LocalPlayer and LocalPlayer.state and LocalPlayer.state.IsInvActive == true)
+
     local suppressed = paused
       or loading
       or truthy(cinematicOpen)
@@ -1095,6 +1264,7 @@ CreateThread(function()
       or truthy(mapOpen)
       or dead
       or truthy(shopBrowsing)
+      or inventoryOpen
 
     if suppressed ~= lastSuppressed then
       lastSuppressed = suppressed
@@ -1119,6 +1289,7 @@ CreateThread(function()
 
 			do
 				local ped = PlayerPedId()
+				local nowMs = GetGameTimer()
 				local tempNow = 0.0
 				if ped ~= 0 then
 					local c = GetEntityCoords(ped)
@@ -1241,6 +1412,10 @@ CreateThread(function()
 				elseif not isHot then
 					lastTempWarnAt = 0.0
 				end
+
+				if stressSystemEnabled then
+					updateStressState(ped, nowMs)
+				end
 			end
 		end
 	end)
@@ -1327,6 +1502,8 @@ CreateThread(function()
 				end
 
 				local function eff(pct, low, label) return (pct <= low) and label or nil end
+				local lowCoreThreshold = tonumber(Config.LowCoreWarning) or 25.0
+				local cleanPulseThreshold = tonumber(Config.MinCleanliness) or lowCoreThreshold
 
 				local needsData
 				if not needsData and (localNeedsState.hunger or localNeedsState.thirst or localNeedsState.stress) then
@@ -1447,7 +1624,7 @@ CreateThread(function()
 					messagesEffectNext = tostring(math.floor(mailboxCount + 0.5))
 				end
 
-				local cleanInner, cleanOuter, cleanNext
+				local cleanInner, cleanOuter, cleanNext, cleanInside
 				if Config.EnableCleanStatsCore then
 					local cleanlinessRank = getAttributeBaseRankSafe(ped, 16)
 					--devPrint('Player cleanliness rank', cleanlinessRank)
@@ -1473,6 +1650,9 @@ CreateThread(function()
 						cleanInner = toCoreState(pct)
 						cleanOuter = toCoreMeter(pct)
 						cleanNext = tostring(round(pct)) .. '%'
+						if pct <= cleanPulseThreshold then
+							cleanInside = 'dirty'
+						end
 					end
 
 					updateCleanlinessFlies(cleanStatsPercent)
@@ -1526,21 +1706,25 @@ CreateThread(function()
 					outerhealth                   = toCoreMeter(playerHealthPct),
 					innerstamina                  = toCoreState(staminaCore),
 					outerstamina                  = toCoreMeter(playerStaminaPct),
+					stamina_threshold             = lowCoreThreshold,
 
 					innerhunger                   = hungerInner,
 					outerhunger                   = hungerOuter,
 					effect_hunger_inside          = hungerInside,
 					effect_hunger_next            = hungerNext,
+					hunger_threshold              = lowCoreThreshold,
 
 					innerthirst                   = thirstInner,
 					outerthirst                   = thirstOuter,
 					effect_thirst_inside          = thirstInside,
 					effect_thirst_next            = thirstNext,
+					thirst_threshold              = lowCoreThreshold,
 
 					innerstress                   = stressInner,
 					outerstress                   = stressOuter,
 					effect_stress_inside          = stressInside,
 					effect_stress_next            = stressNext,
+					stress_threshold              = lowCoreThreshold,
 
 					innerhorse_health             = horseHealthCore and toCoreState(horseHealthCore) or nil,
 					outerhorse_health             = horseHealthPct and toCoreMeter(horseHealthPct) or nil,
@@ -1567,8 +1751,9 @@ CreateThread(function()
 
 					innerclean_stats              = cleanInner,
 					outerclean_stats              = cleanOuter,
-					effect_clean_stats_inside     = nil,
+					effect_clean_stats_inside     = cleanInside,
 					effect_clean_stats_next       = cleanNext,
+					clean_stats_threshold         = cleanPulseThreshold,
 
 					innermoney                    = moneyInner,
 					outermoney                    = moneyOuter,
@@ -1737,7 +1922,7 @@ end)
 registerCommandIfAvailable(commandHeal, function()
 	setLocalNeedValue('hunger', 100.0)
 	setLocalNeedValue('thirst', 100.0)
-	setLocalNeedValue('stress', 0.0)
+	setLocalNeedValue('stress', 100.0)
 	if Config.EnableCleanStatsCore then
 		setCleanStatsPercent(100.0)
 	end

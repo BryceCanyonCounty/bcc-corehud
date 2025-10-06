@@ -238,25 +238,37 @@ const CORE_MAP = {
     inner: 'innerstamina',
     outer: 'outerstamina',
     effectInside: 'effect_stamina_inside',
-    effectNext: 'effect_stamina_next'
+    effectNext: 'effect_stamina_next',
+    meta: {
+      pulseThreshold: 'stamina_threshold'
+    }
   },
   hunger: {
     inner: 'innerhunger',
     outer: 'outerhunger',
     effectInside: 'effect_hunger_inside',
-    effectNext: 'effect_hunger_next'
+    effectNext: 'effect_hunger_next',
+    meta: {
+      pulseThreshold: 'hunger_threshold'
+    }
   },
   thirst: {
     inner: 'innerthirst',
     outer: 'outerthirst',
     effectInside: 'effect_thirst_inside',
-    effectNext: 'effect_thirst_next'
+    effectNext: 'effect_thirst_next',
+    meta: {
+      pulseThreshold: 'thirst_threshold'
+    }
   },
   stress: {
     inner: 'innerstress',
     outer: 'outerstress',
     effectInside: 'effect_stress_inside',
-    effectNext: 'effect_stress_next'
+    effectNext: 'effect_stress_next',
+    meta: {
+      pulseThreshold: 'stress_threshold'
+    }
   },
   messages: {
     inner: 'innermessages',
@@ -268,7 +280,10 @@ const CORE_MAP = {
     inner: 'innerclean_stats',
     outer: 'outerclean_stats',
     effectInside: 'effect_clean_stats_inside',
-    effectNext: 'effect_clean_stats_next'
+    effectNext: 'effect_clean_stats_next',
+    meta: {
+      pulseThreshold: 'clean_stats_threshold'
+    }
   },
   money: {
     inner: 'innermoney',

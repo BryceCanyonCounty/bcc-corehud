@@ -164,6 +164,10 @@ const slotData = computed(() => {
     meta.talking = source.talking === true || source.talking === 1 || source.talking === 'true'
   }
 
+  if (typeof source.pulseThreshold === 'number' && Number.isFinite(source.pulseThreshold)) {
+    meta.pulseThreshold = source.pulseThreshold
+  }
+
   if (props.type === 'logo') {
     const logoSrc = typeof source.image === 'string' ? source.image : null
     if (logoSrc && logoSrc.length > 0) {

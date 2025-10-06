@@ -1,3 +1,7 @@
+<1.7.0>
+- Hide CoreHUD automatically while `vorp_inventory` is open and restore it when closed.  
+- Pulse icons for **Health**, **Stamina**, **Hunger**, **Thirst**, and **Clean** when their value falls below **30%** to provide clear visual warning.  
+- Improve stress UX: add new stress icons and make `commandHeal` reduce/clear stress as part of the healing flow.
 <1.6.1>
 - Added overfeed notification message  
 - Fixed issue where health would not drain when hunger and thirst reached 0  
