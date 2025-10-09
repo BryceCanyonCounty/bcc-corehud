@@ -19,6 +19,7 @@ const ICON_CLASS_MAP = {
   hunger: 'fa-solid fa-apple-whole',
   thirst: 'fa-solid fa-bottle-water',
   stress: null,
+  bleed: 'fa-solid fa-droplet',
   messages: 'fa-solid fa-envelope',
   clean_stats: 'fa-solid fa-soap',
   money: null,
@@ -37,8 +38,8 @@ const ICON_CLASS_MAP = {
 
 const STAT_TYPES = new Set(['money', 'gold', 'exp', 'tokens', 'player_id'])
 const ICONLESS_TYPES = new Set(['messages', 'clean_stats', 'logo'])
-const PULSE_TYPES = new Set(['stamina', 'hunger', 'thirst', 'stress', 'clean_stats'])
-const PULSE_EFFECTS = new Set(['starving', 'parched', 'stressed', 'drained', 'dirty'])
+const PULSE_TYPES = new Set(['stamina', 'hunger', 'thirst', 'stress', 'clean_stats', 'bleed'])
+const PULSE_EFFECTS = new Set(['starving', 'parched', 'stressed', 'drained', 'dirty', 'bleeding'])
 
 const ICON_IMAGE_MAP = {
   money: {
@@ -207,6 +208,17 @@ const iconClass = computed(() => {
       return 'fa-solid fa-face-frown'
     }
     return 'fa-solid fa-face-meh'
+  }
+
+  if (props.type === 'bleed') {
+    const effect = typeof props.effectInside === 'string' ? props.effectInside.toLowerCase() : null
+    if (effect === 'bandaged') {
+      return 'fa-solid fa-bandage'
+    }
+    if (effect === 'bleeding') {
+      return 'fa-solid fa-droplet'
+    }
+    return ICON_CLASS_MAP.bleed
   }
 
   const entry = ICON_CLASS_MAP[props.type]
@@ -381,7 +393,7 @@ const coreFillStyle = computed(() => {
 })
 
 const centerLabel = computed(() => {
-  if (['temperature_value', 'messages', 'clean_stats', 'logo'].includes(props.type) && typeof props.effectNext === 'string' && props.effectNext.length > 0) {
+  if (['temperature_value', 'messages', 'clean_stats', 'bleed', 'logo'].includes(props.type) && typeof props.effectNext === 'string' && props.effectNext.length > 0) {
     return props.effectNext
   }
   return null
@@ -509,7 +521,7 @@ const statValue = computed(() => {
 .core-icon {
   position: relative;
   z-index: 1;
-  font-size: 1.65rem;
+  font-size: 1.45rem;
   color: var(--icon-color);
   text-shadow: var(--icon-shadow);
 }

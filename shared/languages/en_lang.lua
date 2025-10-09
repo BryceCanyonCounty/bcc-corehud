@@ -14,6 +14,7 @@ Locales["en_lang"] = {
     hud_need_hunger_overfed = "You are already full.",
     hud_need_thirst_low = "Parched",
     hud_need_stress_low = "Stressed",
+    hud_bleed_warning = "You are bleeding! Patch yourself up.",
     smoke = "Smoke",
     drop = "Drop",
     change = "Change",

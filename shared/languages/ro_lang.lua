@@ -14,6 +14,7 @@ Locales["ro_lang"] = {
     hud_need_hunger_overfed = "Ești deja sătul.",
     hud_need_thirst_low = "Deshidratat",
     hud_need_stress_low = "Stresat",
+    hud_bleed_warning = "Sângerezi! Bandajează-te.",
     smoke = "Fumeaza",
     drop = "Arunca",
     change = "Schimba",

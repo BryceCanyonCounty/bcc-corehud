@@ -92,6 +92,26 @@ local logoImage = Config.LogoImage
 
 local mailboxCount, lastMailboxRequest = nil, 0
 
+local bleedCoreEnabled = Config.EnableBleedCore == true
+local bleedConfig = type(Config.BleedCore) == 'table' and Config.BleedCore or {}
+local bleedCheckInterval = math.max(1000, tonumber(bleedConfig.CheckInterval) or 10000)
+local bleedDamageCooldown = math.max(500, tonumber(bleedConfig.DamageRefreshCooldown) or 2500)
+local bleedShowWhenHealthy = bleedConfig.ShowWhenHealthy == true
+
+local bleedState = {
+	stage = nil,
+	lastQuery = 0,
+	lastDamageQuery = 0,
+	updatedAt = 0,
+	pending = false
+}
+
+local bleedUsesMedical = false
+if bleedCoreEnabled and type(GetResourceState) == 'function' then
+	local state = GetResourceState('bcc-medical')
+	bleedUsesMedical = (state == 'started' or state == 'starting')
+end
+
 CreateThread(function()
 	local lp = LocalPlayer
 	while not lp or not lp.state do
@@ -150,6 +170,136 @@ end
 local function hideRdrHudIcons()
 	local icons = { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11 }
 	for _, i in ipairs(icons) do UitutorialSetRpgIconVisibility(i, 2) end
+end
+
+-- =============
+-- Bleed helpers
+-- =============
+local function normaliseBleedStage(value)
+	if value == nil then return nil end
+	local number = tonumber(value)
+	if not number or number ~= number then return nil end
+	number = math.floor(number + 0.5)
+	if number < 0 then number = 0 end
+	if number > 2 then number = 2 end
+	return number
+end
+
+local function setBleedStage(stage)
+	if not bleedCoreEnabled then return end
+	local normalized = normaliseBleedStage(stage)
+	local previous = bleedState.stage
+	if normalized ~= previous then
+		bleedState.stage = normalized
+		bleedState.updatedAt = GetGameTimer()
+		hudImmediate = true
+
+		if normalized == 1 then
+			local message = _U('hud_bleed_warning')
+			if type(message) == 'string' and message ~= '' then
+				Notify(message, 'error', 6000)
+			end
+		end
+	end
+end
+
+local function handleBleedResponse(payload)
+	if type(payload) ~= 'table' then
+		return
+	end
+
+	if payload.stage ~= nil then
+		setBleedStage(payload.stage)
+		return
+	end
+
+	if payload.bleed ~= nil then
+		setBleedStage(payload.bleed)
+	end
+end
+
+local function requestBleedStatus(forceDamage)
+	if not bleedCoreEnabled or not bleedUsesMedical or bleedState.pending then return end
+	if not BccUtils or not BccUtils.RPC or type(BccUtils.RPC.CallAsync) ~= 'function' then return end
+
+	local now = GetGameTimer()
+	if forceDamage then
+		if (now - bleedState.lastDamageQuery) < bleedDamageCooldown then return end
+		bleedState.lastDamageQuery = now
+	else
+		if (now - bleedState.lastQuery) < bleedCheckInterval then return end
+	end
+
+	bleedState.lastQuery = now
+	bleedState.pending = true
+
+	CreateThread(function()
+		local ok, result = pcall(function()
+			return BccUtils.RPC:CallAsync('bcc-corehud:bleed:request', {})
+		end)
+		bleedState.pending = false
+
+		if not ok then
+			if Config.devMode then
+				devPrint('[bleed] RPC failure: ' .. tostring(result))
+			end
+			return
+		end
+
+		handleBleedResponse(result)
+	end)
+end
+
+if bleedCoreEnabled and bleedUsesMedical then
+	CreateThread(function()
+		Wait(2500)
+		requestBleedStatus(false)
+		while true do
+			Wait(bleedCheckInterval)
+			requestBleedStatus(false)
+		end
+	end)
+
+	CreateThread(function()
+		if type(DataView) ~= 'table' or type(DataView.ArrayBuffer) ~= 'function' then
+			if Config.devMode then
+				devPrint('[bleed] DataView unavailable; using interval checks only')
+			end
+			return
+		end
+
+		local eventBuffer = DataView.ArrayBuffer(128)
+		local eventDataSize = 9
+
+		while true do
+			Wait(0)
+			local size = GetNumberOfEvents(0)
+			if size > 0 then
+				local ped = PlayerPedId()
+				for i = 0, size - 1 do
+					if GetEventAtIndex(0, i) == `EVENT_ENTITY_DAMAGED` then
+						eventBuffer:SetInt32(0, 0)
+						eventBuffer:SetInt32(8, 0)
+						eventBuffer:SetInt32(16, 0)
+						eventBuffer:SetInt32(24, 0)
+						eventBuffer:SetInt32(32, 0)
+						eventBuffer:SetInt32(40, 0)
+						eventBuffer:SetInt32(48, 0)
+						eventBuffer:SetInt32(56, 0)
+						eventBuffer:SetInt32(64, 0)
+
+						local ok = Citizen.InvokeNative(0x57EC5FA4D4D6AFCA, 0, i, eventBuffer:Buffer(), eventDataSize)
+						if ok and eventBuffer:GetInt32(0) == ped then
+							local damageAmount = eventBuffer:GetFloat32(32)
+							if damageAmount and damageAmount > 0.01 then
+								requestBleedStatus(true)
+							end
+						end
+					end
+				end
+			end
+		end
+	end)
 end
 
 -- =============
@@ -429,7 +579,7 @@ local function maybeNotifyCleanliness(percent, opts)
 
 	cleanlinessWasBelowThreshold = true
 	lastCleanlinessWarningAt = now
-	Notify(message, 'warning')
+	Notify(message, 'warning', 6000)
 end
 
 local function stopCleanlinessFlies()
@@ -765,6 +915,10 @@ RegisterNetEvent('vorp:SelectedCharacter', function(charId)
 
     -- Reapply HUD visibility if your script handles toggle states
     applyHudVisibility()
+
+    if bleedCoreEnabled and bleedUsesMedical then
+        requestBleedStatus(true)
+    end
 end)
 
 local REQUIRED_PERSIST_NUMBERS = {
@@ -1170,6 +1324,14 @@ end)
 
 exports('SetLogo', function(value)
 	setLogoAsset(value)
+end)
+
+RegisterNetEvent('bcc-corehud:setBleedStage', function(value)
+	setBleedStage(value)
+end)
+
+exports('SetBleedStage', function(value)
+	setBleedStage(value)
 end)
 
 -- ==========================
@@ -1701,6 +1863,21 @@ CreateThread(function()
 					logoMeta = { logo = logoImage }
 				end
 
+				local bleedInner, bleedOuter, bleedInside, bleedStageValue
+				if bleedCoreEnabled then
+					bleedStageValue = bleedState.stage
+					if bleedStageValue == 1 then
+						bleedInner, bleedOuter = 15, 15
+						bleedInside = 'bleeding'
+					elseif bleedStageValue == 2 then
+						bleedInner, bleedOuter = 15, 75
+						bleedInside = 'bandaged'
+					elseif bleedStageValue == 0 and bleedShowWhenHealthy then
+						bleedInner, bleedOuter = 15, 99
+						bleedInside = 'bandaged'
+					end
+				end
+
 				local snapshot = {
 					innerhealth                   = toCoreState(healthCore),
 					outerhealth                   = toCoreMeter(playerHealthPct),
@@ -1754,6 +1931,11 @@ CreateThread(function()
 					effect_clean_stats_inside     = cleanInside,
 					effect_clean_stats_next       = cleanNext,
 					clean_stats_threshold         = cleanPulseThreshold,
+
+					innerbleed                    = bleedInner,
+					outerbleed                    = bleedOuter,
+					effect_bleed_inside           = bleedInside,
+					bleed_stage                   = bleedStageValue,
 
 					innermoney                    = moneyInner,
 					outermoney                    = moneyOuter,

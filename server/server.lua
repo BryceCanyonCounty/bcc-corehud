@@ -13,6 +13,7 @@ local DEFAULT_LAYOUT = {
     hunger = { x = 4.437, y = 76.911 },
     thirst = { x = 6.521, y = 74.668 },
     stress = { x = 3.292, y = 93.444 },
+    bleed = { x = 3.719, y = 95.259 },
     clean_stats = { x = 15.75, y = 89.0 },
     messages = { x = 14.865, y = 93.204 },
     voice = { x = 2.042, y = 84.748 },
@@ -1096,6 +1097,55 @@ local function toNum(v)
     v = tonumber(v); return (v and v == v) and v or 0
 end
 
+local function isMedicalResourceActive()
+    if type(GetResourceState) ~= 'function' then
+        return false
+    end
+    local state = GetResourceState('bcc-medical')
+    return state == 'started' or state == 'starting'
+end
+
+local function fetchCharacterBleedStage(character)
+    if not isMedicalResourceActive() then
+        return nil
+    end
+
+    if not character then
+        return nil
+    end
+
+    local charId = character.charIdentifier
+    local identifier = character.identifier
+    if not charId or not identifier then
+        return nil
+    end
+
+    local rows = MySQL.query.await(
+        'SELECT `bleed` FROM `characters` WHERE `charidentifier` = ? AND `identifier` = ? LIMIT 1',
+        { charId, identifier }
+    )
+
+    if not rows or not rows[1] then
+        return nil
+    end
+
+    local raw = rows[1].bleed
+    if raw == nil then
+        return nil
+    end
+
+    local stage = tonumber(raw)
+    if not stage or stage ~= stage then
+        return nil
+    end
+
+    stage = math.floor(stage + 0.5)
+    if stage < 0 then stage = 0 end
+    if stage > 2 then stage = 2 end
+
+    return stage
+end
+
 BccUtils.RPC:Register('bcc-corehud:getBalances', function(params, cb, src)
     local target = tonumber(params and params.targetId) or src
     if not target then
@@ -1130,6 +1180,40 @@ BccUtils.RPC:Register('bcc-corehud:getBalances', function(params, cb, src)
     }
 
     cb({ ok = true, data = data })
+end)
+
+BccUtils.RPC:Register('bcc-corehud:bleed:request', function(params, cb, src)
+    if Config.EnableBleedCore ~= true then
+        cb({ ok = false, reason = 'disabled' })
+        return
+    end
+
+    if not isMedicalResourceActive() then
+        cb({ ok = false, reason = 'no_medical' })
+        return
+    end
+
+    local user = VorpCore.getUser(src)
+    if not user then
+        cb({ ok = false, reason = 'no_user' })
+        return
+    end
+
+    local character = user.getUsedCharacter
+    if not character or not character.charIdentifier then
+        cb({ ok = false, reason = 'no_character' })
+        return
+    end
+
+    local stage = fetchCharacterBleedStage(character)
+    if stage == nil then
+        stage = 0
+    end
+
+    local state = ensurePlayerState(src)
+    state.bleedStage = stage
+
+    cb({ ok = true, bleed = stage, stage = stage })
 end)
 
 -- Check for version updates

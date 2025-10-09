@@ -15,6 +15,7 @@ const PERMANENT_PLACEHOLDERS = new Set([
   'voice',
   'messages',
   'clean_stats',
+  'bleed',
   'money',
   'gold',
   'exp',
@@ -77,6 +78,14 @@ const buildPlaceholderSlot = () => {
         outer: 99,
         effectInside: null,
         effectNext: '100%',
+        meta: null
+      }
+    case 'bleed':
+      return {
+        inner: 15,
+        outer: 99,
+        effectInside: 'bandaged',
+        effectNext: null,
         meta: null
       }
     case 'money':

@@ -16,6 +16,7 @@ const createDefaultCores = () => ({
   hunger: null,
   thirst: null,
   stress: null,
+  bleed: null,
   messages: null,
   clean_stats: null,
   money: null,
@@ -57,6 +58,7 @@ const createDefaultPalette = () => ({
   hunger: { ...DEFAULT_PALETTE_ENTRY },
   thirst: { ...DEFAULT_PALETTE_ENTRY },
   stress: { ...DEFAULT_PALETTE_ENTRY },
+  bleed: { ...DEFAULT_PALETTE_ENTRY },
   messages: { ...DEFAULT_PALETTE_ENTRY },
   clean_stats: { ...DEFAULT_PALETTE_ENTRY },
   money: { ...DEFAULT_PALETTE_ENTRY },
@@ -82,6 +84,7 @@ const SLOT_ORDER = Object.freeze([
   'hunger',
   'thirst',
   'stress',
+  'bleed',
   'messages',
   'clean_stats',
   'money',
@@ -104,6 +107,7 @@ const SLOT_LABELS = Object.freeze({
   hunger: 'Hunger',
   thirst: 'Thirst',
   stress: 'Stress',
+  bleed: 'Bleeding',
   messages: 'Messages',
   clean_stats: 'Cleanliness',
   money: 'Money',
@@ -161,7 +165,7 @@ const saveLayoutLabel = ref(DEFAULT_SAVE_LABEL)
 const layoutHasEntries = computed(() => Object.keys(layoutPositions.value).length > 0)
 const useAbsoluteLayout = computed(() => layoutEditing.value || layoutHasEntries.value)
 const draggingType = computed(() => dragState.value?.type ?? null)
-const canSaveLayout = computed(() => layoutEditing.value && layoutDirty.value)
+const canSaveLayout = computed(() => layoutEditing.value)
 
 const slotRefs = new Map()
 const setSlotRef = (type, el) => {
@@ -268,6 +272,15 @@ const CORE_MAP = {
     effectNext: 'effect_stress_next',
     meta: {
       pulseThreshold: 'stress_threshold'
+    }
+  },
+  bleed: {
+    inner: 'innerbleed',
+    outer: 'outerbleed',
+    effectInside: 'effect_bleed_inside',
+    effectNext: 'effect_bleed_next',
+    meta: {
+      stage: 'bleed_stage'
     }
   },
   messages: {
@@ -832,9 +845,11 @@ watch(layoutEditing, async (editing) => {
 .core-layout-toolbar {
   position: absolute;
   bottom: 6vh;
-  left: 6vw;
+  left: 50%;
+  transform: translateX(-50%);
   display: flex;
-  gap: 0.5rem;
+  justify-content: center;
+  align-items: center;
   pointer-events: auto;
   z-index: 1;
 }

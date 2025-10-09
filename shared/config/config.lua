@@ -97,6 +97,14 @@ Config.FlyEffect                = {
     boneFemale = 464
 }
 
+-- Bleed indicator
+Config.EnableBleedCore          = true
+Config.BleedCore                = {
+    CheckInterval         = 10000, -- Milliseconds between automatic bleed checks
+    DamageRefreshCooldown = 2500,  -- Minimum delay between bleed checks triggered by damage
+    ShowWhenHealthy       = false  -- When true the bleed slot stays visible even when not bleeding
+}
+
 Config.NeedWarningThreshold     = 10.0  -- Percent at/below which hunger/thirst warnings trigger
 Config.NeedWarningInterval      = 120.0 -- Seconds between hunger/thirst warning notifications
 

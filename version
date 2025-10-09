@@ -1,3 +1,8 @@
+<1.8.0>
+- Added a bleed core with medical integration, including configurable polling, notifications, UI slot, state syncing, and README docs.
+- Expanded consumable QoL: returning empty bottles, documenting give support, and reshaping client/server exports and RPC notes.
+- Enhanced cleanliness and bleed alerts via the shared Notify helper and updated README highlights plus configuration guidance.
+- Centered layout save UI, allowed immediate saving, adjusted Font Awesome icon sizing, and rebuilt the NUI after each change.
 <1.7.0>
 - Hide CoreHUD automatically while `vorp_inventory` is open and restore it when closed.  
 - Pulse icons for **Health**, **Stamina**, **Hunger**, **Thirst**, and **Clean** when their value falls below **30%** to provide clear visual warning.  
