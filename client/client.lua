@@ -1008,6 +1008,9 @@ RegisterNetEvent('vorp:SelectedCharacter', function(charId)
 		else
 			devPrint('^1[bcc-corehud]^0 Failed to load palette')
 		end
+
+		-- Ensure balances are up to date once the character is ready
+		refreshBalancesAsync(true)
 	end
 
 	-- Reapply HUD visibility if your script handles toggle states
@@ -1912,10 +1915,10 @@ CreateThread(function()
 						dirtyThreshold = tonumber(dirtyThreshold) or 0
 						if dirtyThreshold < 0 then dirtyThreshold = 0 end
 					end
-					if dirtyThreshold ~= false and rank > 0 and rank <= dirtyThreshold then
-						horseDirtInner, horseDirtOuter, horseDirtInside = 15, 99, "horse_dirty"
-					end
+				if dirtyThreshold ~= false and rank >= dirtyThreshold then
+					horseDirtInner, horseDirtOuter, horseDirtInside = 15, 99, "horse_dirty"
 				end
+			end
 
 				local voice
 				if Config.EnableVoiceCore then
