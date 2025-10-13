@@ -23,3 +23,34 @@ function PersistLayout(characterId, layout)
 
     return result and true or false
 end
+
+function FetchCharacterBleedStage(charId, identifier)
+    if not charId or not identifier then
+        return nil
+    end
+
+    local rows = MySQL.query.await(
+        'SELECT `bleed` FROM `characters` WHERE `charidentifier` = ? AND `identifier` = ? LIMIT 1',
+        { charId, identifier }
+    )
+
+    if not rows or not rows[1] then
+        return nil
+    end
+
+    local raw = rows[1].bleed
+    if raw == nil then
+        return nil
+    end
+
+    local stage = tonumber(raw)
+    if not stage or stage ~= stage then
+        return nil
+    end
+
+    stage = math.floor(stage + 0.5)
+    if stage < 0 then stage = 0 end
+    if stage > 2 then stage = 2 end
+
+    return stage
+end

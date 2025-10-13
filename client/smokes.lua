@@ -54,6 +54,30 @@ function EPrompt(text, button, hold)
     end)
 end
 
+local function disablePrompt(handle)
+    if handle ~= nil then
+        PromptSetEnabled(handle, false)
+        PromptSetVisible(handle, false)
+    end
+end
+
+local function stopSmokingInteractions()
+    disablePrompt(PropPrompt)
+    disablePrompt(UsePrompt)
+    disablePrompt(ChangeStance)
+    proppromptdisplayed = false
+
+    local ped = PlayerPedId()
+    if ped ~= 0 and DoesEntityExist(ped) then
+        ClearPedSecondaryTask(ped)
+        ClearPedTasks(ped)
+    end
+end
+
+AddEventHandler('bcc-corehud:client:stopAllFx', function()
+    stopSmokingInteractions()
+end)
+
 function Anim(actor, dict, body, duration, flags, introtiming, exittiming)
     Citizen.CreateThread(function()
         RequestAnimDict(dict)

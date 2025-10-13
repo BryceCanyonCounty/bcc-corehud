@@ -30,14 +30,6 @@ BCCCoreHudMenu = FeatherMenu:RegisterMenu("bcc:corehud:mainmenu", {
                 ['min-height'] = '300px'
             }
         },
-    },
-    {
-        opened = function()
-            DisplayRadar(false)
-        end,
-        closed = function()
-            DisplayRadar(true)
-        end
     }
 )
 

@@ -19,7 +19,7 @@ const ICON_CLASS_MAP = {
   hunger: 'fa-solid fa-apple-whole',
   thirst: 'fa-solid fa-bottle-water',
   stress: null,
-  bleed: 'fa-solid fa-droplet',
+  bleed: null,
   messages: 'fa-solid fa-envelope',
   clean_stats: 'fa-solid fa-soap',
   money: null,
@@ -70,6 +70,11 @@ const ICON_IMAGE_MAP = {
     default: 'cores/rpg_textures/rpg_consumable_apple.png',
     starving: 'cores/rpg_textures/rpg_underweight.png',
     overfed: 'cores/rpg_textures/rpg_overfed.png'
+  },
+  bleed: {
+    default: 'cores/rpg_textures/bleed_icon.png',
+    bleeding: 'cores/rpg_textures/bleed_active.png',
+    bandaged: 'cores/rpg_textures/bleed_bandaged.png'
   },
   thirst: {
     default: 'cores/rpg_textures/rpg_generic_bottle.png',
@@ -211,14 +216,7 @@ const iconClass = computed(() => {
   }
 
   if (props.type === 'bleed') {
-    const effect = typeof props.effectInside === 'string' ? props.effectInside.toLowerCase() : null
-    if (effect === 'bandaged') {
-      return 'fa-solid fa-bandage'
-    }
-    if (effect === 'bleeding') {
-      return 'fa-solid fa-droplet'
-    }
-    return ICON_CLASS_MAP.bleed
+    return null
   }
 
   const entry = ICON_CLASS_MAP[props.type]
@@ -355,6 +353,9 @@ const shouldPulse = computed(() => {
 
 const coreSlotClasses = computed(() => {
   const classes = ['core-slot']
+  if (typeof props.type === 'string' && props.type.length > 0) {
+    classes.push(`core-slot--${props.type}`)
+  }
   if (props.type === 'voice' && voiceMeta.value?.talking) {
     classes.push('core-slot--voice-talking')
   }
@@ -572,8 +573,8 @@ const statValue = computed(() => {
   filter: none;
   box-shadow: none;
   border-radius: 0.75rem;
-  min-width: 4.25rem;
-  min-height: 4.25rem;
+  min-width: 5.25rem;
+  min-height: 5.25rem;
 }
 
 .core-slot--logo .core-gauge,
@@ -583,14 +584,19 @@ const statValue = computed(() => {
 }
 
 .core-slot--logo-image .core-icon-img {
-  width: 4.25rem;
-  height: 4.25rem;
+  width: 5.25rem;
+  height: 5.25rem;
   border-radius: 0.75rem;
   box-shadow: none;
 }
 
 .core-slot--logo-image .core-icon-label {
   display: none;
+}
+
+.core-slot--bleed .core-icon-img {
+  width: 2rem;
+  height: 2rem;
 }
 
 .core-slot--stat {
@@ -622,8 +628,8 @@ const statValue = computed(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 1.4rem;
-  height: 1.4rem;
+  width: 1.75rem;
+  height: 1.75rem;
 }
 
 .stat-icon-img {
@@ -635,13 +641,13 @@ const statValue = computed(() => {
 }
 
 .stat-icon {
-  font-size: 1.1rem;
+  font-size: 1.35rem;
   color: #f1f5f9;
 }
 
 .stat-value {
   font-family: 'Chineserok', 'Chineserok', 'Noto Sans', sans-serif;
-  font-size: 1.05rem;
+  font-size: 1.2rem;
   font-weight: 700;
   letter-spacing: 0.015em;
   color: #f1f5f9;

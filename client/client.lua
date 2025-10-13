@@ -18,6 +18,7 @@ local C                    = {
 	hotTempThirstDrain       = math.max(0.0, tonumber(Raw.HotTempThirstDrain) or Config.HotTempThirstDrain or 0.0),
 	tempWarnCooldown         = math.max(0.0, tonumber(Raw.TempWarningCooldown) or Config.TempWarningCooldown or 10.0),
 }
+
 local needsIntervalMs      = math.max(100.0, tonumber(C.needsUpdateIntervalMs) or 5000.0)
 local updateIntervalSteps  = needsIntervalMs / 1000.0
 
@@ -43,8 +44,31 @@ end
 local function logActivity(label)
 	if label and label ~= lastActivityLabel then
 		lastActivityLabel = label
-		devPrint(('Activity %s hm=%.2f tm=%.2f'):format(label, hm or 0.0, tm or 0.0))
+		local conf = (type(Config.ActivityMultipliers) == 'table' and Config.ActivityMultipliers[label]) or {}
+		local hungerMult = tonumber(conf.hunger) or 0.0
+		local thirstMult = tonumber(conf.thirst) or 0.0
+		devPrint(('Activity %s hunger=%0.2f thirst=%0.2f'):format(tostring(label), hungerMult, thirstMult))
 	end
+end
+
+local EXP_PER_LEVEL = 1000
+local EXP_LEVEL_PREFIX = 'LV'
+local EXP_LEVEL_BASE = 0
+
+local function getExpLevelInfo(amount)
+	local totalXp = math.max(0, tonumber(amount) or 0)
+	local perLevel = EXP_PER_LEVEL
+	local levelIndex = math.floor(totalXp / perLevel)
+	local level = levelIndex + EXP_LEVEL_BASE
+	local xpIntoLevel = totalXp - (levelIndex * perLevel)
+	local percent = (perLevel > 0) and ((xpIntoLevel / perLevel) * 100.0) or 0.0
+	return {
+		level = level,
+		xpTotal = totalXp,
+		xpIntoLevel = xpIntoLevel,
+		xpPerLevel = perLevel,
+		percent = percent
+	}
 end
 
 local function debugCoreValue(label, inner, outer)
@@ -58,9 +82,9 @@ local function debugCoreValue(label, inner, outer)
 	local currOuter = round2(outer)
 	local prev = lastCoreDebug[label]
 	if not prev or prev.inner ~= currInner or prev.outer ~= currOuter then
-		local innerMsg = currInner and ('%.2f'):format(currInner) or 'nil'
-		local outerMsg = currOuter and ('%.2f'):format(currOuter) or 'nil'
-		devPrint(('[CoreDbg] %s inner=%s outer=%s'):format(label, innerMsg, outerMsg))
+		local innerMsg = currInner and tostring(currInner) or 'nil'
+		local outerMsg = currOuter and tostring(currOuter) or 'nil'
+		devPrint('[CoreDbg] ' .. tostring(label) .. ' inner=' .. innerMsg .. ' outer=' .. outerMsg)
 		lastCoreDebug[label] = { inner = currInner, outer = currOuter }
 	end
 end
@@ -89,14 +113,9 @@ if not Config.VoiceMaxRange or Config.VoiceMaxRange <= 0 then Config.VoiceMaxRan
 local cleanStatsPercent = nil
 local moneyAmount, goldAmount, expAmount, tokensAmount = nil, nil, nil, nil
 local logoImage = Config.LogoImage
+local expLevelState = nil
 
 local mailboxCount, lastMailboxRequest = nil, 0
-
-local bleedCoreEnabled = Config.EnableBleedCore == true
-local bleedConfig = type(Config.BleedCore) == 'table' and Config.BleedCore or {}
-local bleedCheckInterval = math.max(1000, tonumber(bleedConfig.CheckInterval) or 10000)
-local bleedDamageCooldown = math.max(500, tonumber(bleedConfig.DamageRefreshCooldown) or 2500)
-local bleedShowWhenHealthy = bleedConfig.ShowWhenHealthy == true
 
 local bleedState = {
 	stage = nil,
@@ -105,12 +124,6 @@ local bleedState = {
 	updatedAt = 0,
 	pending = false
 }
-
-local bleedUsesMedical = false
-if bleedCoreEnabled and type(GetResourceState) == 'function' then
-	local state = GetResourceState('bcc-medical')
-	bleedUsesMedical = (state == 'started' or state == 'starting')
-end
 
 CreateThread(function()
 	local lp = LocalPlayer
@@ -162,7 +175,7 @@ local function applyHudVisibility()
 			setLayoutEditing(false, { skipSave = true })
 		end
 		hudVisible = shouldShow
-		devPrint('HUD visibility set', hudVisible, 'suppressed', hudSuppressed, 'characterSelected', characterSelected)
+		devPrint('[CoreDbg] HUD visibility set', hudVisible, 'suppressed', hudSuppressed, 'characterSelected', characterSelected)
 		SendNUIMessage({ type = "toggle", visible = hudVisible })
 	end
 end
@@ -186,13 +199,19 @@ local function normaliseBleedStage(value)
 end
 
 local function setBleedStage(stage)
-	if not bleedCoreEnabled then return end
+	if Config.EnableBleedCore ~= true then return end
 	local normalized = normaliseBleedStage(stage)
+	if normalized == nil then
+		if type(Config.BleedCore) == 'table' and Config.BleedCore.UseBccMedical == false then
+			normalized = 0
+		end
+	end
 	local previous = bleedState.stage
 	if normalized ~= previous then
 		bleedState.stage = normalized
 		bleedState.updatedAt = GetGameTimer()
 		hudImmediate = true
+		--devPrint('[bleed] stage update prev=' .. tostring(previous) .. ' new=' .. tostring(normalized))
 
 		if normalized == 1 then
 			local message = _U('hud_bleed_warning')
@@ -201,6 +220,15 @@ local function setBleedStage(stage)
 			end
 		end
 	end
+end
+
+if Config.EnableBleedCore == true and type(Config.BleedCore) == 'table' and Config.BleedCore.UseBccMedical == false and Config.BleedCore.ShowWhenHealthy == true then
+	CreateThread(function()
+		Wait(1500)
+		if bleedState.stage == nil then
+			setBleedStage(0)
+		end
+	end)
 end
 
 local function handleBleedResponse(payload)
@@ -219,15 +247,21 @@ local function handleBleedResponse(payload)
 end
 
 local function requestBleedStatus(forceDamage)
-	if not bleedCoreEnabled or not bleedUsesMedical or bleedState.pending then return end
-	if not BccUtils or not BccUtils.RPC or type(BccUtils.RPC.CallAsync) ~= 'function' then return end
+	if Config.EnableBleedCore ~= true or bleedState.pending then return end
+
+	if type(Config.BleedCore) == 'table' and Config.BleedCore.UseBccMedical == false then return end
 
 	local now = GetGameTimer()
+	local damageCooldownValue = (type(Config.BleedCore) == 'table') and Config.BleedCore.DamageRefreshCooldown or nil
+	local checkIntervalValue = (type(Config.BleedCore) == 'table') and Config.BleedCore.CheckInterval or nil
+	local damageCooldown = math.max(500, tonumber(damageCooldownValue) or 2500)
+	local checkInterval = math.max(1000, tonumber(checkIntervalValue) or 10000)
+
 	if forceDamage then
-		if (now - bleedState.lastDamageQuery) < bleedDamageCooldown then return end
+		if (now - bleedState.lastDamageQuery) < damageCooldown then return end
 		bleedState.lastDamageQuery = now
 	else
-		if (now - bleedState.lastQuery) < bleedCheckInterval then return end
+		if (now - bleedState.lastQuery) < checkInterval then return end
 	end
 
 	bleedState.lastQuery = now
@@ -240,58 +274,80 @@ local function requestBleedStatus(forceDamage)
 		bleedState.pending = false
 
 		if not ok then
-			if Config.devMode then
-				devPrint('[bleed] RPC failure: ' .. tostring(result))
-			end
+			devPrint('[bleed] RPC failure: ' .. tostring(result))
 			return
 		end
 
-		handleBleedResponse(result)
+		if type(result) == 'table' and result.ok == true then
+			--devPrint('[bleed] RPC success stage=' .. tostring(result.stage or result.bleed))
+			handleBleedResponse(result)
+		else
+			devPrint('[bleed] RPC unavailable: ' .. tostring(result and result.reason or 'unknown'))
+		end
 	end)
 end
 
-if bleedCoreEnabled and bleedUsesMedical then
-	CreateThread(function()
-		Wait(2500)
+CreateThread(function()
+	if Config.EnableBleedCore ~= true then
+		return
+	end
+	if type(Config.BleedCore) == 'table' and Config.BleedCore.UseBccMedical == false then
+		devPrint('[bleed] bcc-medical integration disabled; skipping bleed polling')
+		return
+	end
+	Wait(2500)
+	requestBleedStatus(false)
+	while true do
+		local intervalConfig = (type(Config.BleedCore) == 'table') and Config.BleedCore.CheckInterval or nil
+		local checkInterval = math.max(1000, tonumber(intervalConfig) or 10000)
+		Wait(checkInterval)
 		requestBleedStatus(false)
-		while true do
-			Wait(bleedCheckInterval)
-			requestBleedStatus(false)
-		end
-	end)
+	end
+end)
 
-	CreateThread(function()
-		if type(DataView) ~= 'table' or type(DataView.ArrayBuffer) ~= 'function' then
-			if Config.devMode then
-				devPrint('[bleed] DataView unavailable; using interval checks only')
-			end
-			return
-		end
+CreateThread(function()
+	if Config.EnableBleedCore ~= true then
+        return
+    end
+	if type(Config.BleedCore) == 'table' and Config.BleedCore.UseBccMedical == false then
+		devPrint('[bleed] bcc-medical integration disabled; running local damage listener')
+	end
 
-		local eventBuffer = DataView.ArrayBuffer(128)
-		local eventDataSize = 9
+	if type(DataView) ~= 'table' or type(DataView.ArrayBuffer) ~= 'function' then
+		devPrint('[bleed] DataView unavailable; using interval checks only')
+		return
+	end
 
-		while true do
-			Wait(0)
-			local size = GetNumberOfEvents(0)
-			if size > 0 then
-				local ped = PlayerPedId()
-				for i = 0, size - 1 do
-					if GetEventAtIndex(0, i) == `EVENT_ENTITY_DAMAGED` then
-						eventBuffer:SetInt32(0, 0)
-						eventBuffer:SetInt32(8, 0)
-						eventBuffer:SetInt32(16, 0)
-						eventBuffer:SetInt32(24, 0)
-						eventBuffer:SetInt32(32, 0)
-						eventBuffer:SetInt32(40, 0)
-						eventBuffer:SetInt32(48, 0)
-						eventBuffer:SetInt32(56, 0)
-						eventBuffer:SetInt32(64, 0)
+	local eventBuffer = DataView.ArrayBuffer(128)
+	local eventDataSize = 9
 
-						local ok = Citizen.InvokeNative(0x57EC5FA4D4D6AFCA, 0, i, eventBuffer:Buffer(), eventDataSize)
-						if ok and eventBuffer:GetInt32(0) == ped then
-							local damageAmount = eventBuffer:GetFloat32(32)
-							if damageAmount and damageAmount > 0.01 then
+	while true do
+		Wait(0)
+		local size = GetNumberOfEvents(0)
+		if size > 0 then
+			local ped = PlayerPedId()
+			for i = 0, size - 1 do
+				if GetEventAtIndex(0, i) == `EVENT_ENTITY_DAMAGED` then
+					eventBuffer:SetInt32(0, 0)
+					eventBuffer:SetInt32(8, 0)
+					eventBuffer:SetInt32(16, 0)
+					eventBuffer:SetInt32(24, 0)
+					eventBuffer:SetInt32(32, 0)
+					eventBuffer:SetInt32(40, 0)
+					eventBuffer:SetInt32(48, 0)
+					eventBuffer:SetInt32(56, 0)
+					eventBuffer:SetInt32(64, 0)
+
+					local ok = Citizen.InvokeNative(0x57EC5FA4D4D6AFCA, 0, i, eventBuffer:Buffer(), eventDataSize)
+					if ok and eventBuffer:GetInt32(0) == ped then
+						local damageAmount = eventBuffer:GetFloat32(32)
+						if damageAmount and damageAmount > 0.01 then
+							if type(Config.BleedCore) == 'table' and Config.BleedCore.UseBccMedical == false then
+								if bleedState.stage == nil or bleedState.stage < 1 then
+									print(bleedState.stage)
+									setBleedStage(1)
+								end
+							else
 								requestBleedStatus(true)
 							end
 						end
@@ -299,8 +355,8 @@ if bleedCoreEnabled and bleedUsesMedical then
 				end
 			end
 		end
-	end)
-end
+	end
+end)
 
 -- =============
 -- Needs state
@@ -456,7 +512,8 @@ local function playConsumeAnimation(spec)
 	activeConsumeProp = prop
 
 	local boneIndex = GetEntityBoneIndexByName(ped, 'SKEL_R_HAND')
-	AttachEntityToEntity(prop, ped, boneIndex, attach.x, attach.y, attach.z, attach.rx, attach.ry, attach.rz, true, true, false, true, 1, true)
+	AttachEntityToEntity(prop, ped, boneIndex, attach.x, attach.y, attach.z, attach.rx, attach.ry, attach.rz, true, true,
+		false, true, 1, true)
 
 	TaskPlayAnim(ped, dict, clip, 1.0, 1.0, -1, 31, 0.0, false, false, false)
 	Wait(duration and math.max(0, duration) or defaultDuration)
@@ -591,6 +648,30 @@ local function stopCleanlinessFlies()
 	cleanlinessFxRequested = false
 end
 
+local function stopAllHudFxInternal(reason)
+	stopTemperatureFx()
+	stopCleanlinessFlies()
+	if Config.DoHealthDamageFx then
+		AnimpostfxStop('MP_Downed')
+	end
+	AnimpostfxStopAll()
+	cleanupConsumeProp()
+
+	local ped = PlayerPedId()
+	if ped ~= 0 and DoesEntityExist(ped) then
+		ClearPedSecondaryTask(ped)
+		ClearPedTasks(ped)
+	end
+end
+
+RegisterNetEvent('bcc-corehud:client:stopAllFx', function(reason)
+	stopAllHudFxInternal(reason)
+end)
+
+local function stopAllHudFx(reason)
+	TriggerEvent('bcc-corehud:client:stopAllFx', reason)
+end
+
 local function updateCleanlinessFlies(cleanPercent)
 	if not Config.EnableCleanStatsCore or not Config.MinCleanliness or not CLEANLINESS_FLIES.enabled then
 		if cleanlinessFxActive then stopCleanlinessFlies() end
@@ -723,14 +804,26 @@ local function setMailboxCount(value)
 		mailboxCount = nil
 		return
 	end
+	local previous = mailboxCount
 	if value == nil then
 		mailboxCount = nil
-		return
+	else
+		local n = tonumber(value)
+		if not n or n <= 0 then
+			mailboxCount = nil
+		else
+			mailboxCount = math.floor(n + 0.5)
+			if mailboxCount < 1 then
+				mailboxCount = nil
+			end
+		end
 	end
-	local n = tonumber(value)
-	if not n then return end
-	if n < 0 then n = 0 end
-	mailboxCount = n
+	if previous ~= mailboxCount and hudVisible then
+		if Config.devMode then
+			devPrint(('[Mailbox] client count updated: prev=%s new=%s'):format(tostring(previous), tostring(mailboxCount)))
+		end
+		hudImmediate = true
+	end
 end
 
 local function setCleanStatsPercent(value)
@@ -776,14 +869,18 @@ end
 
 local function setExpAmount(value)
 	if not Config.EnableExpCore then
-		expAmount = nil; return
+		expAmount = nil
+		expLevelState = nil
+		return
 	end
 	local n = tonumber(value)
 	if n == nil then
 		expAmount = nil
+		expLevelState = nil
 		return
 	end
 	expAmount = n
+	expLevelState = getExpLevelInfo(expAmount)
 end
 
 local function setTokensAmount(value)
@@ -892,33 +989,33 @@ CreateThread(function()
 end)
 
 RegisterNetEvent('vorp:SelectedCharacter', function(charId)
-    characterSelected = true
-    devPrint('[bcc-corehud] Character selected: ' .. tostring(charId))
+	characterSelected = true
+	devPrint('[bcc-corehud] Character selected: ' .. tostring(charId))
 
-    if characterSelected then
-        -- Request HUD layout
-        local layoutOk = BccUtils.RPC:CallAsync('bcc-corehud:layout:request', {})
-        if layoutOk then
-            devPrint('[bcc-corehud] Layout successfully loaded')
-        else
-            devPrint('^1[bcc-corehud]^0 Failed to load layout')
-        end
+	if characterSelected then
+		-- Request HUD layout
+		local layoutOk = BccUtils.RPC:CallAsync('bcc-corehud:layout:request', {})
+		if layoutOk then
+			devPrint('[bcc-corehud] Layout successfully loaded')
+		else
+			devPrint('^1[bcc-corehud]^0 Failed to load layout')
+		end
 
-        -- Request HUD palette
-        local paletteOk = BccUtils.RPC:CallAsync('bcc-corehud:palette:request', {})
-        if paletteOk then
-            devPrint('[bcc-corehud] Palette successfully loaded')
-        else
-            devPrint('^1[bcc-corehud]^0 Failed to load palette')
-        end
-    end
+		-- Request HUD palette
+		local paletteOk = BccUtils.RPC:CallAsync('bcc-corehud:palette:request', {})
+		if paletteOk then
+			devPrint('[bcc-corehud] Palette successfully loaded')
+		else
+			devPrint('^1[bcc-corehud]^0 Failed to load palette')
+		end
+	end
 
-    -- Reapply HUD visibility if your script handles toggle states
-    applyHudVisibility()
+	-- Reapply HUD visibility if your script handles toggle states
+	applyHudVisibility()
 
-    if bleedCoreEnabled and bleedUsesMedical then
-        requestBleedStatus(true)
-    end
+	if Config.EnableBleedCore == true then
+		requestBleedStatus(true)
+	end
 end)
 
 local REQUIRED_PERSIST_NUMBERS = {
@@ -946,7 +1043,6 @@ local function setLocalNeedValue(stat, value, options)
 
 	if value == nil then
 		localNeedsState[stat] = nil
-		-- keep tracker value cleared if other code reads it, but no timers/rates
 		if needsDecayTrackers[stat] then needsDecayTrackers[stat].value = nil end
 		if stat == 'hunger' then hungerOverfedActive = false end
 		return
@@ -1015,7 +1111,8 @@ local function updateStressState(ped, nowMs)
 	if not stressSystemEnabled then return end
 	if ped == 0 or not DoesEntityExist(ped) or IsEntityDead(ped) then return end
 
-	local speedInterval = math.max(100, math.floor(tonumber(stressSettings.speedCheckIntervalMs) or needsIntervalMs or 1000))
+	local speedInterval = math.max(100,
+		math.floor(tonumber(stressSettings.speedCheckIntervalMs) or needsIntervalMs or 1000))
 	local speedMinMph = tonumber(stressSettings.minimumSpeedMph) or 0.0
 	local speedGainMin = math.floor(tonumber(stressSettings.speedStressMin) or 1)
 	local speedGainMax = math.floor(tonumber(stressSettings.speedStressMax) or speedGainMin)
@@ -1023,14 +1120,24 @@ local function updateStressState(ped, nowMs)
 
 	if speedGainMax > 0 and speedMinMph > 0 and nowMs >= stressNextSpeedCheck then
 		stressNextSpeedCheck = nowMs + speedInterval
+		local mph = nil
+
 		if IsPedInAnyVehicle(ped, false) then
 			local veh = GetVehiclePedIsIn(ped, false)
 			if veh ~= 0 then
-				local mph = GetEntitySpeed(veh) * 2.236936
-				if mph >= speedMinMph then
-					local gain = randomInRange(speedGainMin, speedGainMax)
-					if gain > 0 then gainStress(gain) end
-				end
+				mph = GetEntitySpeed(veh) * 2.236936
+			end
+		elseif IsPedOnMount(ped) then
+			local mount = GetMount(ped)
+			if mount ~= 0 then
+				mph = GetEntitySpeed(mount) * 2.236936
+			end
+		end
+
+		if mph and mph >= speedMinMph then
+			local gain = randomInRange(speedGainMin, speedGainMax)
+			if gain > 0 then
+				gainStress(gain)
 			end
 		end
 	end
@@ -1139,18 +1246,18 @@ RegisterNetEvent('bcc-corehud:setNeeds', function(payload)
 end)
 
 BccUtils.RPC:Register('bcc-corehud:layout:apply', function(params, cb)
-    local layout = nil
-    if type(params) == 'table' then
-        layout = params.layout or params
-    end
+	local layout = nil
+	if type(params) == 'table' then
+		layout = params.layout or params
+	end
 
-    if type(layout) == 'table' then
-        sendLayoutToNui(layout)
-    else
-        sendLayoutToNui(nil)
-    end
+	if type(layout) == 'table' then
+		sendLayoutToNui(layout)
+	else
+		sendLayoutToNui(nil)
+	end
 
-    if cb then cb(true) end
+	if cb then cb(true) end
 end)
 
 
@@ -1271,6 +1378,9 @@ exports('AddNeed', function(stat, delta)
 end)
 
 RegisterNetEvent('bcc-corehud:setMailboxCount', function(value)
+	if Config.devMode then
+		devPrint(('[Mailbox] event setMailboxCount value=%s'):format(tostring(value)))
+	end
 	setMailboxCount(value)
 end)
 
@@ -1341,7 +1451,8 @@ local function setTalkerProximity(m)
 	if type(MumbleSetTalkerProximity) == 'function' then MumbleSetTalkerProximity(m) end
 	if type(MumbleSetAudioInputDistance) == 'function' then MumbleSetAudioInputDistance(m) end
 	if type(MumbleSetAudioOutputDistance) == 'function' then MumbleSetAudioOutputDistance(m) end
-	if Config.devMode then print(('[BCC-CoreHUD] Voice proximity set: %.1fm'):format(m)) end
+	local voiceValue = math.floor((m * 10) + 0.5) / 10
+	devPrint('[BCC-CoreHUD] Voice proximity set: ' .. tostring(voiceValue) .. 'm')
 end
 
 local function applyVoiceStep(idx, skipNotify)
@@ -1388,52 +1499,93 @@ end)
 
 local lastPersistTick, lastPersistedSnapshot = 0, nil
 function RequestLayoutFromServer()
-    local success = BccUtils.RPC:CallAsync('bcc-corehud:layout:request', {})
+	local success = BccUtils.RPC:CallAsync('bcc-corehud:layout:request', {})
 
-    if success then
-        devPrint('[bcc-corehud:layout:request] Layout request completed successfully')
-    else
-        devPrint('^1[bcc-corehud:layout:request]^0 Layout request failed')
-    end
+	if success then
+		devPrint('[bcc-corehud:layout:request] Layout request completed successfully')
+	else
+		devPrint('^1[bcc-corehud:layout:request]^0 Layout request failed')
+	end
 
-    return success
+	return success
 end
 
 local function truthy(v) return v == true or v == 1 or v == -1 end
 
+local menuVisible = false -- temporarily disabled below event hooks
+
+--[[
+-- VORP menu support
+AddEventHandler('vorp_menu:openmenu', function()
+	menuVisible = true
+end)
+
+AddEventHandler('vorp_menu:closemenu', function()
+	menuVisible = false
+end)
+
+-- Feather menu support (fires for any Feather menu)
+AddEventHandler('FeatherMenu:opened', function(event)
+	if event.menuid == 'bcc:corehud:mainmenu' then return end
+	menuVisible = true
+end)
+
+AddEventHandler('FeatherMenu:closed', function(event)
+	if event.menuid == 'bcc:corehud:mainmenu' then return end
+	menuVisible = false
+end)
+]]
+
 CreateThread(function()
-  local lastSuppressed = nil
-  while true do
-    Wait(100)
+	local lastSuppressed = nil
+	local wasDead = false
+	while true do
+		Wait(100)
 
-    local ped           = PlayerPedId()
-    local paused        = IsPauseMenuActive()
-    local cinematicOpen = IsInCinematicMode()
-    local cinematicCam  = IsCinematicCamRendering() or false
-    local mapOpen       = IsUiappActiveByHash(`MAP`)
-    local loading       = IsLoadingScreenVisible() or false
-    -- FIXED: only true when SHOP_BROWSING is actually active
-    local shopBrowsing  = IsUiappActiveByHash(`SHOP_BROWSING`)
+		local ped               = PlayerPedId()
+		local paused            = IsPauseMenuActive()
+		local cinematicOpen     = IsInCinematicMode()
+		local cinematicCam      = IsCinematicCamRendering() or false
+		local mapOpen           = IsUiappActiveByHash(`MAP`)
+		local loading           = IsLoadingScreenVisible() or false
+		local screenFadedOut    = IsScreenFadedOut()
+		local screenFadedIn     = IsScreenFadedIn()
+		local screenFadingOut   = IsScreenFadingOut()
+		local screenFadingIn    = IsScreenFadingIn()
+		local gameplayHint      = IsGameplayHintActive()
+		local gameplayCamRender = IsGameplayCamRendering()
+		local shopBrowsing      = IsUiappActiveByHash(`SHOP_BROWSING`)
+		local dead              = (ped ~= 0 and IsEntityDead(ped))
+		local inventoryOpen     = (LocalPlayer and LocalPlayer.state and LocalPlayer.state.IsInvActive == true)
 
-    local dead = (ped ~= 0 and IsEntityDead(ped))
+		if dead and not wasDead then
+			stopAllHudFx('death')
+		end
 
-    local inventoryOpen = (LocalPlayer and LocalPlayer.state and LocalPlayer.state.IsInvActive == true)
+		local suppressed        = paused
+			or loading
+			or screenFadedOut
+			or screenFadingOut
+			or screenFadingIn
+			or (not screenFadedIn and not screenFadingIn)
+			or truthy(cinematicOpen)
+			or cinematicCam == true
+			or truthy(mapOpen)
+			or gameplayHint == true
+			or not gameplayCamRender
+			or dead
+			or truthy(shopBrowsing)
+			or inventoryOpen
+			or menuVisible -- <- new flag
 
-    local suppressed = paused
-      or loading
-      or truthy(cinematicOpen)
-      or cinematicCam == true
-      or truthy(mapOpen)
-      or dead
-      or truthy(shopBrowsing)
-      or inventoryOpen
+		wasDead = dead
 
-    if suppressed ~= lastSuppressed then
-      lastSuppressed = suppressed
-      hudSuppressed = suppressed
-      applyHudVisibility()
-    end
-  end
+		if suppressed ~= lastSuppressed then
+			lastSuppressed = suppressed
+			hudSuppressed = suppressed
+			applyHudVisibility()
+		end
+	end
 end)
 
 CreateThread(function()
@@ -1441,6 +1593,7 @@ CreateThread(function()
 	Wait(500)
 
 	if characterSelected then
+		Wait(2500)
 		RequestLayoutFromServer()
 	end
 	if Config.EnableVoiceCore then applyVoiceStep(voiceStepIndex, true) end
@@ -1449,138 +1602,141 @@ CreateThread(function()
 	while true do
 		Wait(needsWaitMs)
 
-			do
-				local ped = PlayerPedId()
-				local nowMs = GetGameTimer()
-				local tempNow = 0.0
+		do
+			local ped = PlayerPedId()
+			local nowMs = GetGameTimer()
+			local tempNow = 0.0
+			if ped ~= 0 then
+				local c = GetEntityCoords(ped)
+				local t = GetTemperatureAtCoords(c.x, c.y, c.z)
+				tempNow = tonumber(t) or 0.0
+			end
+			if Config.TemperatureColdThreshold and tempNow <= Config.TemperatureColdThreshold then
+				currentTemperatureEffect = 'cold'
+			elseif Config.TemperatureHotThreshold and tempNow >= Config.TemperatureHotThreshold then
+				currentTemperatureEffect = 'hot'
+			else
+				currentTemperatureEffect = nil
+			end
+
+			local isHungerEmpty = localNeedsState.hunger ~= nil and localNeedsState.hunger <= 0.0
+			local isThirstEmpty = localNeedsState.thirst ~= nil and localNeedsState.thirst <= 0.0
+
+			if Config.NeedsAutoDecay then
+				local label = 'idle'
 				if ped ~= 0 then
-					local c = GetEntityCoords(ped)
-					local t = GetTemperatureAtCoords(c.x, c.y, c.z)
-					tempNow = tonumber(t) or 0.0
-				end
-				if Config.TemperatureColdThreshold and tempNow <= Config.TemperatureColdThreshold then
-					currentTemperatureEffect = 'cold'
-				elseif Config.TemperatureHotThreshold and tempNow >= Config.TemperatureHotThreshold then
-					currentTemperatureEffect = 'hot'
-				else
-					currentTemperatureEffect = nil
-				end
-
-				local isHungerEmpty = localNeedsState.hunger ~= nil and localNeedsState.hunger <= 0.0
-				local isThirstEmpty = localNeedsState.thirst ~= nil and localNeedsState.thirst <= 0.0
-
-				if Config.NeedsAutoDecay then
-					local label = 'idle'
-					if ped ~= 0 then
-						if IsPedOnMount(ped) then
-							label = 'mounted'
-						elseif IsPedSwimming(ped) or IsPedSwimmingUnderWater(ped) then
-							label = 'swim'
-						elseif IsPedSprinting(ped) then
-							label = 'sprint'
-						elseif IsPedRunning(ped) then
-							label = 'run'
-						elseif IsPedWalking(ped) then
-							label = 'walk'
-						elseif IsPedStill(ped) then
-							label = 'idle'
-						else
-							label = 'idle'
-						end
-					end
-
-					if label == 'mounted' and (type(Config.ActivityMultipliers) ~= 'table' or not Config.ActivityMultipliers.mounted) then
+					if IsPedOnMount(ped) then
+						label = 'mounted'
+					elseif IsPedSwimming(ped) or IsPedSwimmingUnderWater(ped) then
+						label = 'swim'
+					elseif IsPedSprinting(ped) then
+						label = 'sprint'
+					elseif IsPedRunning(ped) then
 						label = 'run'
-					end
-
-					if label ~= lastActivityLabel then
-						logActivity(label)
-						lastActivityLabel = label
-						if hudVisible then hudImmediate = true end
-					end
-
-					local conf = (type(Config.ActivityMultipliers) == 'table' and Config.ActivityMultipliers[label]) or {}
-					local hungerDrain = tonumber(conf.hunger) or 0.0
-					local thirstDrain = tonumber(conf.thirst) or 0.0
-
-					local function applyDrain(stat, dec)
-						if dec <= 0 then return end
-						local cur = localNeedsState[stat]
-						if cur == nil or cur <= 0 then return end
-						local nextVal = clamp(cur - dec, 0.0, 100.0)
-						setLocalNeedValue(stat, nextVal, { resetDelay = false })
-						devPrint(("[decay] %s %s %.2f -> %.2f (%.2f removed)"):format(label, stat, cur, nextVal, dec))
-					end
-
-					applyDrain('hunger', hungerDrain)
-					applyDrain('thirst', thirstDrain)
-
-					isHungerEmpty = localNeedsState.hunger ~= nil and localNeedsState.hunger <= 0.0
-					isThirstEmpty = localNeedsState.thirst ~= nil and localNeedsState.thirst <= 0.0
-				end
-
-				if C.starvationDamageAmount > 0.0 then
-					if isHungerEmpty and isThirstEmpty then
-						starvationElapsed, starvationTimer, starvationDelaySatisfied = 0.0, 0.0, true
-						if ped ~= 0 and not IsEntityDead(ped) then
-							local dmg = math.floor(C.starvationDamageAmount + 0.5)
-							if dmg > 0 then
-								local currentHealth = GetEntityHealth(ped)
-									if currentHealth ~= nil then
-										if Config.DoHealthPainSound then
-											PlayPain(ped, 9, 1, true, true)
-										end
-										local nextHealth = math.max(0, currentHealth - dmg)
-										SetEntityHealth(ped, nextHealth, 0)
-										if Config.DoHealthDamageFx then AnimpostfxPlay('MP_Downed') end
-									end
-								end
-							end
-						else
-							starvationElapsed, starvationTimer, starvationDelaySatisfied = 0.0, 0.0, false
-							if Config.DoHealthDamageFx then AnimpostfxStop('MP_Downed') end
-						end
+					elseif IsPedWalking(ped) then
+						label = 'walk'
+					elseif IsPedStill(ped) then
+						label = 'idle'
 					else
-						starvationElapsed, starvationTimer, starvationDelaySatisfied = 0.0, 0.0, false
-						if Config.DoHealthDamageFx then AnimpostfxStop('MP_Downed') end
+						label = 'idle'
 					end
-
-				local isHot = false
-				if ped ~= 0 and not IsEntityDead(ped) then
-					isHot = select(1, applySimpleTemperatureDamage(ped, tempNow))
-				else
-					stopTemperatureFx()
 				end
 
-				if isHot and C.hotTempThirstDrain > 0 then
-					local curThirst = localNeedsState.thirst
-					if curThirst ~= nil and curThirst > 0 then
-						local drain = C.hotTempThirstDrain
-						if drain > 0 then
-							local newThirst = clamp(curThirst - drain, 0.0, 100.0)
-							if newThirst ~= curThirst then
-								setLocalNeedValue('thirst', newThirst, { resetDelay = false })
+				if label == 'mounted' and (type(Config.ActivityMultipliers) ~= 'table' or not Config.ActivityMultipliers.mounted) then
+					label = 'run'
+				end
+
+				if label ~= lastActivityLabel then
+					logActivity(label)
+					lastActivityLabel = label
+					if hudVisible then hudImmediate = true end
+				end
+
+				local conf = (type(Config.ActivityMultipliers) == 'table' and Config.ActivityMultipliers[label]) or {}
+				local hungerDrain = tonumber(conf.hunger) or 0.0
+				local thirstDrain = tonumber(conf.thirst) or 0.0
+
+				local function applyDrain(stat, dec)
+					if dec <= 0 then return end
+					local cur = localNeedsState[stat]
+					if cur == nil or cur <= 0 then return end
+					local nextVal = clamp(cur - dec, 0.0, 100.0)
+					setLocalNeedValue(stat, nextVal, { resetDelay = false })
+					local curValue = math.floor((cur * 100) + 0.5) / 100
+					local nextValue = math.floor((nextVal * 100) + 0.5) / 100
+					local decValue = math.floor((dec * 100) + 0.5) / 100
+					--devPrint('[decay] ' .. tostring(label) .. ' ' .. tostring(stat) .. ' ' .. tostring(curValue) .. ' -> ' .. tostring(nextValue) .. ' (' .. tostring(decValue) .. ' removed)')
+				end
+
+				applyDrain('hunger', hungerDrain)
+				applyDrain('thirst', thirstDrain)
+
+				isHungerEmpty = localNeedsState.hunger ~= nil and localNeedsState.hunger <= 0.0
+				isThirstEmpty = localNeedsState.thirst ~= nil and localNeedsState.thirst <= 0.0
+			end
+
+			if C.starvationDamageAmount > 0.0 then
+				if isHungerEmpty and isThirstEmpty then
+					starvationElapsed, starvationTimer, starvationDelaySatisfied = 0.0, 0.0, true
+					if ped ~= 0 and not IsEntityDead(ped) then
+						local dmg = math.floor(C.starvationDamageAmount + 0.5)
+						if dmg > 0 then
+							local currentHealth = GetEntityHealth(ped)
+							if currentHealth ~= nil then
+								if Config.DoHealthPainSound then
+									PlayPain(ped, 9, 1, true, true)
+								end
+								local nextHealth = math.max(0, currentHealth - dmg)
+								SetEntityHealth(ped, nextHealth, 0)
+								if Config.DoHealthDamageFx then AnimpostfxPlay('MP_Downed') end
 							end
 						end
 					end
+				else
+					starvationElapsed, starvationTimer, starvationDelaySatisfied = 0.0, 0.0, false
+					if Config.DoHealthDamageFx then AnimpostfxStop('MP_Downed') end
 				end
+			else
+				starvationElapsed, starvationTimer, starvationDelaySatisfied = 0.0, 0.0, false
+				if Config.DoHealthDamageFx then AnimpostfxStop('MP_Downed') end
+			end
 
-				if isHot and tempWarningMessage then
-					local now = GetGameTimer() / 1000.0
-					if now - lastTempWarnAt >= C.tempWarnCooldown then
-						lastTempWarnAt = now
-						Notify(_U('hud_temp_warning_overheat'), 'warning', 5000)
+			local isHot = false
+			if ped ~= 0 and not IsEntityDead(ped) then
+				isHot = select(1, applySimpleTemperatureDamage(ped, tempNow))
+			else
+				stopTemperatureFx()
+			end
+
+			if isHot and C.hotTempThirstDrain > 0 then
+				local curThirst = localNeedsState.thirst
+				if curThirst ~= nil and curThirst > 0 then
+					local drain = C.hotTempThirstDrain
+					if drain > 0 then
+						local newThirst = clamp(curThirst - drain, 0.0, 100.0)
+						if newThirst ~= curThirst then
+							setLocalNeedValue('thirst', newThirst, { resetDelay = false })
+						end
 					end
-				elseif not isHot then
-					lastTempWarnAt = 0.0
-				end
-
-				if stressSystemEnabled then
-					updateStressState(ped, nowMs)
 				end
 			end
+
+			if isHot and tempWarningMessage then
+				local now = GetGameTimer() / 1000.0
+				if now - lastTempWarnAt >= C.tempWarnCooldown then
+					lastTempWarnAt = now
+					Notify(_U('hud_temp_warning_overheat'), 'warning', 5000)
+				end
+			elseif not isHot then
+				lastTempWarnAt = 0.0
+			end
+
+			if stressSystemEnabled then
+				updateStressState(ped, nowMs)
+			end
 		end
-	end)
+	end
+end)
 
 CreateThread(function()
 	while true do
@@ -1606,6 +1762,33 @@ CreateThread(function()
 					return clamp((h / mh) * 100.0, 0.0, 100.0)
 				end
 				local function staminaPct(p)
+					local st = GetPedStamina(p)
+					local pedDesc = (p == PlayerPedId()) and 'player' or ('ped-' .. tostring(p))
+					--devPrint(('GetPedStamina(%s) returned %s'):format(pedDesc, tostring(st)))
+					if st ~= nil then
+						st = tonumber(st) or 0.0
+						local maxSt = nil
+						if p == PlayerPedId() then
+							local playerMax = GetPedMaxStamina(PlayerId())
+							if playerMax ~= nil then
+								maxSt = tonumber(playerMax)
+							end
+						end
+						if not maxSt then
+							local pedMax = GetPedMaxStamina(p)
+							if pedMax ~= nil then
+								maxSt = tonumber(pedMax)
+							end
+						end
+						if maxSt and maxSt > 0.0 then
+							return clamp((st / maxSt) * 100.0, 0.0, 100.0)
+						end
+						if st >= 0.0 and st <= 1.0 then
+							return clamp(st * 100.0, 0.0, 100.0)
+						end
+						return clamp(st, 0.0, 100.0)
+					end
+
 					if p == PlayerPedId() then
 						local playerRaw = GetPlayerStamina(PlayerId())
 						if playerRaw ~= nil then
@@ -1613,27 +1796,6 @@ CreateThread(function()
 						end
 					end
 
-					local st = GetPedStamina(p)
-					local pedDesc = (p == PlayerPedId()) and 'player' or ('ped-' .. tostring(p))
-					--devPrint(('GetPedStamina(%s) returned %s'):format(pedDesc, tostring(st)))
-					if st then
-						st = tonumber(st)
-						local mst = nil
-						if p == PlayerPedId() then
-							local playerMax = GetPlayerMaxStamina(PlayerId())
-							if playerMax ~= nil then
-								mst = tonumber(playerMax)
-							end
-						end
-						if not mst then
-							mst = GetPedMaxStamina(p)
-							--devPrint(('GetPedMaxStamina(%s) returned %s'):format(pedDesc, tostring(mst)))
-						end
-						if mst and mst > 0.0 then
-							return clamp((st / mst) * 100.0, 0.0, 100.0)
-						end
-						return clamp(st, 0.0, 100.0)
-					end
 					return getCore(p, 1)
 				end
 
@@ -1686,7 +1848,8 @@ CreateThread(function()
 						local p = pctOrNil(tonumber(needsData.hunger))
 						if p ~= nil then
 							hungerInner, hungerOuter = toCoreState(p), toCoreMeter(p)
-							local hungerEffect = hungerOverfedActive and 'overfed' or eff(p, Config.LowCoreWarning, 'starving')
+							local hungerEffect = hungerOverfedActive and 'overfed' or
+							eff(p, Config.LowCoreWarning, 'starving')
 							hungerInside = hungerEffect
 							hungerNext = tostring(round(p)) .. '%'
 						end
@@ -1727,20 +1890,29 @@ CreateThread(function()
 
 				local tempInner, tempOuter, tempInside, tempNext = nil, nil, nil, nil
 				local tempValInner, tempValOuter, tempValNext = nil, nil, nil
-				if tempPct ~= nil then
+				local showTemperatureAlways = Config.AlwaysShowTemperature == true
+				local tempEffect = currentTemperatureEffect
+
+				if tempEffect or showTemperatureAlways then
+					tempInner, tempOuter = 15, 99
+					tempInside = tempEffect
+				end
+
+				if tempPct ~= nil and (tempEffect or showTemperatureAlways) then
 					tempValInner, tempValOuter = 15, 99
 					tempValNext = tostring(round(worldTemp)) .. '°'
-				end
-				if currentTemperatureEffect then
-					tempInner, tempOuter = 15, 99
-					tempInside = currentTemperatureEffect
 				end
 
 				local horseDirtInner, horseDirtOuter, horseDirtInside = nil, nil, nil
 				if horse ~= 0 then
 					local rank = getAttributeBaseRankSafe(horse, 16)
-					--devPrint('Horse cleanliness rank', rank)
-					if rank <= Config.HorseDirtyThreshold then
+					devPrint('Horse cleanliness rank', rank)
+					local dirtyThreshold = Config.HorseDirtyThreshold
+					if dirtyThreshold ~= false then
+						dirtyThreshold = tonumber(dirtyThreshold) or 0
+						if dirtyThreshold < 0 then dirtyThreshold = 0 end
+					end
+					if dirtyThreshold ~= false and rank > 0 and rank <= dirtyThreshold then
 						horseDirtInner, horseDirtOuter, horseDirtInside = 15, 99, "horse_dirty"
 					end
 				end
@@ -1769,21 +1941,25 @@ CreateThread(function()
 							proximity = prox,
 							proximityPercent = percent
 						}
-					elseif Config.devMode and not voiceErrorLogged then
+					elseif not voiceErrorLogged then
 						devPrint('Voice talking check unavailable')
 						voiceErrorLogged = true
 					end
 				end
 
 				local messagesInner, messagesOuter, messagesEffectNext
-				if Config.EnableMailboxCore and mailboxCount then
-					local capped = mailboxCount
-					if capped < 0 then capped = 0 end
-					if C.mailboxMaxMessages > 0 then capped = math.min(capped, C.mailboxMaxMessages) end
-					local pct = (C.mailboxMaxMessages > 0) and ((capped / C.mailboxMaxMessages) * 100.0) or 0.0
+				if Config.EnableMailboxCore and mailboxCount and mailboxCount > 0 then
+					local count = math.floor(mailboxCount + 0.5)
+					local pct
+					if C.mailboxMaxMessages > 0 then
+						local capped = math.min(count, C.mailboxMaxMessages)
+						pct = (capped / C.mailboxMaxMessages) * 100.0
+					else
+						pct = 100.0
+					end
 					messagesInner = toCoreState(pct)
 					messagesOuter = toCoreMeter(pct)
-					messagesEffectNext = tostring(math.floor(mailboxCount + 0.5))
+					messagesEffectNext = tostring(count)
 				end
 
 				local cleanInner, cleanOuter, cleanNext, cleanInside
@@ -1838,10 +2014,16 @@ CreateThread(function()
 					goldNext = prettyNumber(goldAmount)
 				end
 
-				local expInner, expOuter, expNext
+				local expInner, expOuter, expNext, expInside
 				if Config.EnableExpCore and expAmount ~= nil then
-					expInner, expOuter = 15, 99
-					expNext = 'XP ' .. prettyNumber(expAmount)
+					local info = expLevelState or getExpLevelInfo(expAmount)
+					local pct = clamp(tonumber(info.percent) or 0.0, 0.0, 100.0)
+					expInner = toCoreState(pct)
+					expOuter = toCoreMeter(pct)
+					local levelNumber = math.max(0, math.floor(tonumber(info.level) or 0))
+					local levelLabel = tostring(levelNumber)
+					expInside = levelLabel
+					expNext = levelLabel
 				end
 
 				local tokensInner, tokensOuter, tokensNext
@@ -1854,7 +2036,7 @@ CreateThread(function()
 				local serverId = GetPlayerServerId(PlayerId())
 				if serverId ~= nil then
 					playerIdInner, playerIdOuter = 15, 99
-					playerIdNext = ('ID %s'):format(tostring(serverId))
+					playerIdNext = 'ID ' .. tostring(serverId)
 				end
 
 				local logoInner, logoOuter, logoMeta
@@ -1864,17 +2046,26 @@ CreateThread(function()
 				end
 
 				local bleedInner, bleedOuter, bleedInside, bleedStageValue
-				if bleedCoreEnabled then
+				if Config.EnableBleedCore == true then
+					local bleedShowWhenHealthy = false
+					if type(Config.BleedCore) == 'table' and Config.BleedCore.ShowWhenHealthy == true then
+						bleedShowWhenHealthy = true
+					end
 					bleedStageValue = bleedState.stage
 					if bleedStageValue == 1 then
-						bleedInner, bleedOuter = 15, 15
+						bleedInner, bleedOuter = 15, 99
 						bleedInside = 'bleeding'
 					elseif bleedStageValue == 2 then
-						bleedInner, bleedOuter = 15, 75
-						bleedInside = 'bandaged'
-					elseif bleedStageValue == 0 and bleedShowWhenHealthy then
 						bleedInner, bleedOuter = 15, 99
 						bleedInside = 'bandaged'
+					elseif bleedStageValue == 0 and bleedShowWhenHealthy then
+						if type(Config.BleedCore) == 'table' and Config.BleedCore.UseBccMedical == false then
+							bleedInner, bleedOuter = 0, 99
+							bleedInside = nil
+						else
+							bleedInner, bleedOuter = 15, 99
+							bleedInside = nil
+						end
 					end
 				end
 
@@ -1949,8 +2140,8 @@ CreateThread(function()
 
 					innerexp                      = expInner,
 					outerexp                      = expOuter,
-					effect_exp_inside             = nil,
-					effect_exp_next               = expNext,
+						effect_exp_inside             = expInside,
+						effect_exp_next               = expNext,
 
 					innertokens                   = tokensInner,
 					outertokens                   = tokensOuter,
@@ -2072,24 +2263,24 @@ registerCommandIfAvailable(commandToggleHud, function()
 end)
 
 registerCommandIfAvailable(commandLayout, function(_, args)
-    if type(args) == 'table' and args[1] then
-        local sub = tostring(args[1]):lower()
+	if type(args) == 'table' and args[1] then
+		local sub = tostring(args[1]):lower()
 
-        if sub == 'reset' then
-            setLayoutEditing(false, { skipSave = true })
+		if sub == 'reset' then
+			setLayoutEditing(false, { skipSave = true })
 
-            local success = BccUtils.RPC:CallAsync('bcc-corehud:layout:reset', {})
-            if success then
-                devPrint('[bcc-corehud:layout:reset] Layout reset successfully')
-            else
-                devPrint('^1[bcc-corehud:layout:reset]^0 Failed to reset layout')
-            end
+			local success = BccUtils.RPC:CallAsync('bcc-corehud:layout:reset', {})
+			if success then
+				devPrint('[bcc-corehud:layout:reset] Layout reset successfully')
+			else
+				devPrint('^1[bcc-corehud:layout:reset]^0 Failed to reset layout')
+			end
 
-            return
-        end
-    end
+			return
+		end
+	end
 
-    setLayoutEditing(not hudLayoutEditing)
+	setLayoutEditing(not hudLayoutEditing)
 end)
 
 registerCommandIfAvailable(commandPalette, function()
@@ -2097,7 +2288,7 @@ registerCommandIfAvailable(commandPalette, function()
 end)
 
 registerCommandIfAvailable(commandClearFx, function()
-	AnimpostfxStopAll()
+	stopAllHudFx('command')
 	Notify(_U('hud_fx_cleared'), 'info')
 end)
 
@@ -2131,48 +2322,48 @@ RegisterNUICallback('setLayoutEditing', function(data, cb)
 end)
 
 RegisterNUICallback('saveLayout', function(data, cb)
-    local function normNumber(n)
-        n = tonumber(n) or 0
-        if n < 0 then n = 0 end
-        if n > 100 then n = 100 end
-        return n
-    end
+	local function normNumber(n)
+		n = tonumber(n) or 0
+		if n < 0 then n = 0 end
+		if n > 100 then n = 100 end
+		return n
+	end
 
-    local raw = (type(data) == 'table' and (data.positions or data.layout or data)) or nil
-    local normalized = {}
+	local raw = (type(data) == 'table' and (data.positions or data.layout or data)) or nil
+	local normalized = {}
 
-    if type(raw) == 'table' then
-        for key, v in pairs(raw) do
-            if type(v) == 'table' then
-                -- accept x/y; or left/top; or array {x,y}
-                local x = v.x or v.left or v.l or v[1]
-                local y = v.y or v.top or v.t or v[2]
+	if type(raw) == 'table' then
+		for key, v in pairs(raw) do
+			if type(v) == 'table' then
+				-- accept x/y; or left/top; or array {x,y}
+				local x = v.x or v.left or v.l or v[1]
+				local y = v.y or v.top or v.t or v[2]
 
-                -- accept strings
-                x = tonumber(x)
-                y = tonumber(y)
+				-- accept strings
+				x = tonumber(x)
+				y = tonumber(y)
 
-                if x and y then
-                    -- if UI gives 0..1, promote to percent
-                    if x <= 1 and y <= 1 then
-                        x = x * 100
-                        y = y * 100
-                    end
-                    normalized[key] = { x = normNumber(x), y = normNumber(y) }
-                end
-            end
-        end
-    end
+				if x and y then
+					-- if UI gives 0..1, promote to percent
+					if x <= 1 and y <= 1 then
+						x = x * 100
+						y = y * 100
+					end
+					normalized[key] = { x = normNumber(x), y = normNumber(y) }
+				end
+			end
+		end
+	end
 
-    SendNUIMessage({ type = 'layout', positions = normalized })
+	SendNUIMessage({ type = 'layout', positions = normalized })
 
-    local success = BccUtils.RPC:CallAsync('bcc-corehud:layout:save', { layout = normalized })
+	local success = BccUtils.RPC:CallAsync('bcc-corehud:layout:save', { layout = normalized })
 
-    if success then
-        devPrint('[bcc-corehud:layout:save] Layout saved successfully')
-    else
-        devPrint('^1[bcc-corehud:layout:save]^0 Failed to save layout')
-    end
+	if success then
+		devPrint('[bcc-corehud:layout:save] Layout saved successfully')
+	else
+		devPrint('^1[bcc-corehud:layout:save]^0 Failed to save layout')
+	end
 
-    if cb then cb('ok') end
+	if cb then cb('ok') end
 end)

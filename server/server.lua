@@ -3,26 +3,26 @@ if defaultNeedValue < 0.0 then defaultNeedValue = 0.0 end
 if defaultNeedValue > 100.0 then defaultNeedValue = 100.0 end
 
 local DEFAULT_LAYOUT = {
-    money = { x = 92.624, y = 18.185 },
-    gold = { x = 92.729, y = 20.573 },
-    exp = { x = 92.574, y = 23.056 },
-    tokens = { x = 93.406, y = 25.63 },
-    player_id = { x = 91.584, y = 28.167 },
-    health = { x = 11.469, y = 74.636 },
-    stamina = { x = 8.969, y = 73.782 },
-    hunger = { x = 4.437, y = 76.911 },
-    thirst = { x = 6.521, y = 74.668 },
-    stress = { x = 3.292, y = 93.444 },
-    bleed = { x = 3.719, y = 95.259 },
-    clean_stats = { x = 15.75, y = 89.0 },
-    messages = { x = 14.865, y = 93.204 },
-    voice = { x = 2.042, y = 84.748 },
-    logo = { x = 1.771, y = 78.397 },
-    temperature = { x = 2.833, y = 80.629 },
-    temperature_value = { x = 2.146, y = 89.687 },
-    horse_health = { x = 15.073, y = 80.37 },
-    horse_stamina = { x = 13.563, y = 76.815 },
-    horse_dirt = { x = 15.906, y = 84.556 }
+    health = { x = 5.375, y = 75.269 },
+    gold = { x = 2.742, y = 55.625 },
+    tokens = { x = 4.497, y = 64.751 },
+    messages = { x = 15.593, y = 91.166 },
+    horse_health = { x = 15.802, y = 82.5 },
+    bleed = { x = 3.979, y = 95.722 },
+    money = { x = 2.834, y = 58.794 },
+    hunger = { x = 10.532, y = 73.746 },
+    exp = { x = 1.781, y = 61.531 },
+    temperature_value = { x = 2.146, y = 87.465 },
+    player_id = { x = 2.421, y = 52.695 },
+    horse_dirt = { x = 16.062, y = 86.962 },
+    temperature = { x = 14.031, y = 95.185 },
+    thirst = { x = 12.821, y = 75.3 },
+    horse_stamina = { x = 14.552, y = 78.482 },
+    stress = { x = 2.667, y = 91.762 },
+    stamina = { x = 8.03, y = 73.767 },
+    logo = { x = 2.761, y = 70.711 },
+    voice = { x = 2.145, y = 82.804 },
+    clean_stats = { x = 3.292, y = 78.537 },
 }
 
 local playerStates = {}
@@ -140,13 +140,109 @@ end
 local function resolveSource(characterId)
     characterId = characterId and tostring(characterId) or nil
     if not characterId then return nil end
-    local src = characterSources[characterId]
-    if src then
-        return src
+
+    local cached = characterSources[characterId]
+    if cached ~= nil then
+        local numeric = tonumber(cached)
+        if numeric and GetPlayerName(numeric) ~= nil then
+            return numeric
+        end
+        characterSources[characterId] = nil
+        if Config.devMode then
+            devPrint(('[Mailbox] stale cached src for %s removed'):format(characterId))
+        end
     end
-    characterSources[characterId] = nil
+
+    if type(VorpCore) == 'table' and type(VorpCore.getUser) == 'function' then
+        for _, playerId in ipairs(GetPlayers()) do
+            local src = tonumber(playerId)
+            if src then
+                local user = VorpCore.getUser(src)
+                if user then
+                    local character = user.getUsedCharacter
+                    if character and tostring(character.charIdentifier) == characterId then
+                        characterSources[characterId] = src
+                        if Config.devMode then
+                            devPrint(('[Mailbox] resolved %s -> src %s via VORP'):format(characterId, tostring(src)))
+                        end
+                        return src
+                    end
+                end
+            end
+        end
+    end
+
+    if Config.devMode then
+        devPrint(('[Mailbox] resolveSource failed for %s'):format(characterId))
+    end
     return nil
 end
+
+local function pushMailboxCount(characterId, count)
+    local src = resolveSource(characterId)
+    if not src then return end
+    if Config.devMode then
+        devPrint(('[Mailbox] pushing count=%s to src=%s (char=%s)'):format(tostring(count), tostring(src),
+        tostring(characterId)))
+    end
+    TriggerClientEvent('bcc-corehud:setMailboxCount', src, count)
+end
+
+local function toNonEmptyString(value)
+    if value == nil then return nil end
+    local str = tostring(value)
+    if str == '' then return nil end
+    return str
+end
+
+local function refreshMailboxCore(characterId)
+    if not Config.EnableMailboxCore then return end
+    if not characterId then return end
+
+    local charIdStr = toNonEmptyString(characterId)
+    if not charIdStr then return end
+
+    local mailbox = MySQL.single.await(
+        'SELECT mailbox_id, postal_code FROM bcc_mailboxes WHERE char_identifier = ? LIMIT 1',
+        { charIdStr }
+    )
+    if not mailbox then
+        pushMailboxCount(characterId, 0)
+        return
+    end
+
+    local mailboxIdStr = toNonEmptyString(mailbox.mailbox_id)
+    if not mailboxIdStr then
+        pushMailboxCount(characterId, 0)
+        return
+    end
+
+    local postalCodeStr = toNonEmptyString(mailbox.postal_code) or ''
+
+    local count = MySQL.scalar.await(
+        'SELECT COUNT(*) FROM bcc_mailbox_messages WHERE is_read = 0 AND (to_char = ? OR to_char = ? OR to_char = ?)',
+        { mailboxIdStr, postalCodeStr, charIdStr }
+    ) or 0
+
+    if Config.devMode then
+        devPrint(('[Mailbox] char=%s mailbox=%s postal=%s count=%s'):format(
+            tostring(characterId), tostring(mailboxIdStr), tostring(postalCodeStr), tostring(count)
+        ))
+    end
+
+    pushMailboxCount(characterId, count)
+end
+
+RegisterNetEvent('bcc-corehud:server:refreshMailbox', function(characterId)
+    if source ~= 0 then
+        return
+    end
+    refreshMailboxCore(characterId)
+end)
+
+exports('RefreshMailboxCore', function(characterId)
+    refreshMailboxCore(characterId)
+end)
 
 local function clearSourceState(src)
     if not src then
@@ -168,7 +264,21 @@ local function clearSourceState(src)
     playerStates[src] = nil
 end
 
+CreateThread(function()
+    while true do
+        local interval = math.max(1000, tonumber(Config.MailboxUpdateInterval) or 30000)
+        Wait(interval)
+
+        if Config.EnableMailboxCore then
+            for characterId in pairs(characterSources) do
+                refreshMailboxCore(characterId)
+            end
+        end
+    end
+end)
+
 local function linkSourceToCharacter(src, characterId)
+    characterId = characterId and tostring(characterId) or nil
     if not characterId then
         devPrint("Missing characterId for src:", src)
         return
@@ -177,7 +287,8 @@ local function linkSourceToCharacter(src, characterId)
     devPrint(("Linking src=%s to characterId=%s"):format(tostring(src), tostring(characterId)))
 
     local state = ensurePlayerState(src)
-    local previousCharacter = state.characterId
+    local previousCharacter = state.characterId and tostring(state.characterId) or nil
+    local changedCharacter = previousCharacter ~= characterId
 
     if previousCharacter and previousCharacter ~= characterId then
         if characterSources[previousCharacter] == src then
@@ -200,6 +311,10 @@ local function linkSourceToCharacter(src, characterId)
     -- store the new mapping
     state.characterId = characterId
     characterSources[characterId] = src
+
+    if changedCharacter then
+        refreshMailboxCore(characterId)
+    end
 
     --devPrint(("[linkSourceToCharacter] ✅ Linked src=%s <-> characterId=%s"):format(tostring(src), tostring(characterId)))
 end
@@ -1002,14 +1117,17 @@ local function registerNeedItems()
         return
     end
 
+    local resourceName = GetCurrentResourceName()
+
     for _, entry in ipairs(entries) do
         local itemName = entry.item
         if type(itemName) == 'string' and itemName ~= '' then
-            exports.vorp_inventory:registerUsableItem(itemName, function(data)
+            local entryConfig = entry
+            local function handleNeedItem(data)
                 local src = data.source
                 exports.vorp_inventory:closeInventory(src)
 
-                if entry.remove ~= false then
+                if entryConfig.remove ~= false then
                     if data.item and data.item.id then
                         exports.vorp_inventory:subItemById(src, data.item.id)
                     else
@@ -1017,28 +1135,28 @@ local function registerNeedItems()
                     end
                 end
 
-                if entry.give and entry.give.item then
-                    local giveCount = tonumber(entry.give.count) or 1
+                if entryConfig.give and entryConfig.give.item then
+                    local giveCount = tonumber(entryConfig.give.count) or 1
                     if giveCount > 0 then
-                        exports.vorp_inventory:addItem(src, entry.give.item, giveCount)
+                        exports.vorp_inventory:addItem(src, entryConfig.give.item, giveCount)
                     end
                 end
 
-                applyNeedModifiers(src, entry)
+                applyNeedModifiers(src, entryConfig)
 
                 TriggerClientEvent('bcc-corehud:playConsumeAnim', src, {
-                    prop = entry.prop,
-                    animation = entry.animation or entry.anim,
-                    duration = entry.duration
+                    prop = entryConfig.prop,
+                    animation = entryConfig.animation or entryConfig.anim,
+                    duration = entryConfig.duration
                 })
 
-                local staminaValue = tonumber(entry.stamina)
+                local staminaValue = tonumber(entryConfig.stamina)
                 if staminaValue and staminaValue > 0 then
                     if staminaValue > 100 then staminaValue = 100 end
                     TriggerClientEvent('bcc-corehud:setStaminaCore', src, staminaValue)
                 end
 
-                local healthValue = tonumber(entry.health or entry.healthCore)
+                local healthValue = tonumber(entryConfig.health or entryConfig.healthCore)
                 if healthValue and healthValue > 0 then
                     if healthValue > 100 then healthValue = 100 end
                     TriggerClientEvent('bcc-corehud:setHealthCore', src, healthValue)
@@ -1058,15 +1176,30 @@ local function registerNeedItems()
                     end
                 end
 
-                queueOverpower(0, entry.OuterCoreHealthGold)
-                queueOverpower(0, entry.InnerCoreHealthGold)
-                queueOverpower(1, entry.OuterCoreStaminaGold)
-                queueOverpower(1, entry.InnerCoreStaminaGold)
+                queueOverpower(0, entryConfig.OuterCoreHealthGold)
+                queueOverpower(0, entryConfig.InnerCoreHealthGold)
+                queueOverpower(1, entryConfig.OuterCoreStaminaGold)
+                queueOverpower(1, entryConfig.InnerCoreStaminaGold)
 
                 if #overpower > 0 then
                     TriggerClientEvent('bcc-corehud:applyAttributeOverpower', src, overpower)
                 end
-            end, GetCurrentResourceName())
+            end
+
+            local ok, err = pcall(function()
+                exports.vorp_inventory:registerUsableItem(itemName, handleNeedItem, resourceName)
+            end)
+
+            if not ok then
+                local message = ('[BCC-CoreHUD] Failed to register need item "%s": %s'):format(
+                    tostring(itemName), tostring(err)
+                )
+                if devPrint then
+                    devPrint(message)
+                else
+                    print('^1' .. message .. '^0')
+                end
+            end
         end
     end
 end
@@ -1095,55 +1228,6 @@ end)
 
 local function toNum(v)
     v = tonumber(v); return (v and v == v) and v or 0
-end
-
-local function isMedicalResourceActive()
-    if type(GetResourceState) ~= 'function' then
-        return false
-    end
-    local state = GetResourceState('bcc-medical')
-    return state == 'started' or state == 'starting'
-end
-
-local function fetchCharacterBleedStage(character)
-    if not isMedicalResourceActive() then
-        return nil
-    end
-
-    if not character then
-        return nil
-    end
-
-    local charId = character.charIdentifier
-    local identifier = character.identifier
-    if not charId or not identifier then
-        return nil
-    end
-
-    local rows = MySQL.query.await(
-        'SELECT `bleed` FROM `characters` WHERE `charidentifier` = ? AND `identifier` = ? LIMIT 1',
-        { charId, identifier }
-    )
-
-    if not rows or not rows[1] then
-        return nil
-    end
-
-    local raw = rows[1].bleed
-    if raw == nil then
-        return nil
-    end
-
-    local stage = tonumber(raw)
-    if not stage or stage ~= stage then
-        return nil
-    end
-
-    stage = math.floor(stage + 0.5)
-    if stage < 0 then stage = 0 end
-    if stage > 2 then stage = 2 end
-
-    return stage
 end
 
 BccUtils.RPC:Register('bcc-corehud:getBalances', function(params, cb, src)
@@ -1184,32 +1268,31 @@ end)
 
 BccUtils.RPC:Register('bcc-corehud:bleed:request', function(params, cb, src)
     if Config.EnableBleedCore ~= true then
+        if devPrint then devPrint('[bleed:request] disabled', src) end
         cb({ ok = false, reason = 'disabled' })
         return
     end
-
-    if not isMedicalResourceActive() then
-        cb({ ok = false, reason = 'no_medical' })
+    if type(Config.BleedCore) == 'table' and Config.BleedCore.UseBccMedical == false then
+        if devPrint then devPrint('[bleed:request] integration_disabled', src) end
+        cb({ ok = false, reason = 'integration_disabled' })
         return
     end
 
     local user = VorpCore.getUser(src)
     if not user then
+        if devPrint then devPrint('[bleed:request] no_user', src) end
         cb({ ok = false, reason = 'no_user' })
         return
     end
 
     local character = user.getUsedCharacter
     if not character or not character.charIdentifier then
+        if devPrint then devPrint('[bleed:request] no_character', src) end
         cb({ ok = false, reason = 'no_character' })
         return
     end
 
-    local stage = fetchCharacterBleedStage(character)
-    if stage == nil then
-        stage = 0
-    end
-
+    local stage = FetchCharacterBleedStage(character.charIdentifier, character.identifier) or 0
     local state = ensurePlayerState(src)
     state.bleedStage = stage
 

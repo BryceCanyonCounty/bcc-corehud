@@ -1,3 +1,21 @@
+<1.9.0>
+## New Additions
+- Added more options to hide the HUD during screen fade-in/fade-out and similar transitions.  
+- Added new images for the bleeding core.  
+- Changed the money icon.  
+- Updated the default layout configuration for improved positioning and balance.  
+
+## Code Changes
+- Removed some redundant code for cleaner performance and easier maintenance.  
+
+## 🐛 Bug Fixes
+- Fixed logo not showing.  
+- Fixed bleeding core display issue.  
+- Stopped all visual FX when entity is dead.  
+- Fixed horse icon visibility when horse is dirty.  
+- Fixed activity multiplayer issues.  
+- Fixed mailbox core icon not showing when receiving mail.  
+- Removed additional redundant code.
 <1.8.0>
 - Added a bleed core with medical integration, including configurable polling, notifications, UI slot, state syncing, and README docs.
 - Expanded consumable QoL: returning empty bottles, documenting give support, and reshaping client/server exports and RPC notes.

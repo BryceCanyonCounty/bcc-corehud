@@ -9,7 +9,7 @@ Config.UpdateInterval           = 5000         -- Core refresh rate in milliseco
 Config.NeedsUpdateInterval      = 5000         -- Interval (ms) at which hunger/thirst/temperature logic runs
 Config.LowCoreWarning           = 25.0         -- Trigger status effects when cores fall below this percent
 Config.devMode                  = false         -- Enable verbose client logging when true
-Config.HorseDirtyThreshold      = 4            -- Attribute rank at/below which the horse shows the dirty icon (0-10, set false to disable)
+Config.HorseDirtyThreshold      = 45            -- Attribute rank at/below which the horse shows the dirty icon (set 0 to treat rank 0 as clean, false to disable)
 Config.TemperatureColdThreshold = -3.0         -- World temperature (Celsius) at/below which cold icon appears
 Config.TemperatureHotThreshold  = 26.0         -- World temperature (Celsius) at/above which hot icon appears
 Config.TemperatureMin           = -15.0        -- Minimum world temperature mapped to the core (Celsius)
@@ -21,10 +21,10 @@ Config.NeedsDecayStartDelay     = 300.0        -- Seconds to wait before decay b
 Config.ActivityMultipliers      = {
     idle   = { hunger = 0.05, thirst = 0.07 }, -- applied repeatedly while almost still
     walk   = { hunger = 0.10, thirst = 0.20 }, -- gentle movement
-    run    = { hunger = 0.45, thirst = 0.60 }, -- steady run
-    sprint = { hunger = 0.65, thirst = 0.80 }, -- full sprint
-    coast  = { hunger = 0.65, thirst = 0.40 }, -- default fallback when standing but not flagged idle
-    swim   = { hunger = 0.65, thirst = 0.40 },  -- swimming effort
+    run    = { hunger = 0.15, thirst = 0.20 }, -- steady run
+    sprint = { hunger = 0.15, thirst = 0.20 }, -- full sprint
+    coast  = { hunger = 0.15, thirst = 0.20 }, -- default fallback when standing but not flagged idle
+    swim   = { hunger = 0.15, thirst = 0.20 },  -- swimming effort
     mounted = { hunger = 0.08, thirst = 0.08 }
 }
 Config.InitialNeedValue         = 100.0        -- Default hunger/thirst value applied on spawn when using local decay
@@ -74,7 +74,6 @@ Config.VoiceCycleControl        = 0x446258B6                       -- example ke
 
 -- Mailbox indicator (integrates with bcc-mailbox)
 Config.EnableMailboxCore        = true          -- Show a messages core when true
-Config.MailboxResourceName      = 'bcc-mailbox' -- Resource providing the mailbox API/export
 Config.MailboxMaxMessages       = 10            -- Count required to fill the ring (10 unread = full)
 Config.MailboxUpdateInterval    = 30000         -- How often to refresh the count from the server (milliseconds)
 Config.Notify                   = "feather-menu"
@@ -100,9 +99,10 @@ Config.FlyEffect                = {
 -- Bleed indicator
 Config.EnableBleedCore          = true
 Config.BleedCore                = {
-    CheckInterval         = 10000, -- Milliseconds between automatic bleed checks
+    CheckInterval         = 1000, -- Milliseconds between automatic bleed checks
     DamageRefreshCooldown = 2500,  -- Minimum delay between bleed checks triggered by damage
-    ShowWhenHealthy       = false  -- When true the bleed slot stays visible even when not bleeding
+    ShowWhenHealthy       = true,  -- When true the bleed slot stays visible even when not bleeding
+    UseBccMedical         = true   -- When true the HUD polls bcc-medical for bleed state; set false when integrating a different system
 }
 
 Config.NeedWarningThreshold     = 10.0  -- Percent at/below which hunger/thirst warnings trigger
@@ -123,7 +123,7 @@ Config.EnableTokensCore         = true -- Displays tokens or premium points
 
 -- Logo / watermark indicator
 Config.EnableLogoCore           = true                                      -- Set true to show a draggable logo slot
-Config.LogoImage                = 'https://hoinarii.ro/assets/img/logo.png' -- Path/URL served by NUI for the logo image
+Config.LogoImage                = 'logo.png' -- Path/URL served by NUI for the logo image
 
 -- Database persistence (requires oxmysql)
 Config.SaveInterval             = 15000 -- Minimum delay between persisted snapshots per player (milliseconds)

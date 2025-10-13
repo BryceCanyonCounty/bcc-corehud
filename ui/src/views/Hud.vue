@@ -334,7 +334,7 @@ const CORE_MAP = {
     effectInside: 'effect_logo_inside',
     effectNext: 'effect_logo_next',
     meta: {
-      logo: 'logo_image'
+      image: 'logo_image'
     }
   },
   voice: {
