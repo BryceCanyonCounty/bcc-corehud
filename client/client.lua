@@ -2264,6 +2264,11 @@ local function setHudVisible(visible)
 	applyHudVisibility()
 end
 
+exports('ToggleUI', function()
+	print('Exported ToggleUI called')
+	ToggleUI()
+end)
+
 function ToggleUI() setHudVisible(not hudPreference) end
 
 local commandToggleHud = Config.CommandToggleHud
