@@ -137,12 +137,14 @@ Add the new file to `shared/config/needitems/`, and the manifest will load it au
 | `SetLogo(path)` | Change the logo slot image. |
 | `SetBleedStage(stage)` | Push bleed core state when integrating with other medical scripts. |
 | `PlayConsumeAnimation(spec)` | Trigger the built-in consume animation helper. |
+| `ToggleUI` | Toggles HUD Visability |
 
 Example:
 
 ```lua
 exports['bcc-corehud']:SetNeeds({ hunger = 75, thirst = 60, stress = 20 })
 exports['bcc-corehud']:SetBleedStage(1) -- mark player as bleeding
+exports['bcc-corehud']:ToggleUI()
 ```
 
 ### Server exports
