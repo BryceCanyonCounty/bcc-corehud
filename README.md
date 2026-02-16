@@ -144,7 +144,7 @@ Example:
 ```lua
 exports['bcc-corehud']:SetNeeds({ hunger = 75, thirst = 60, stress = 20 })
 exports['bcc-corehud']:SetBleedStage(1) -- mark player as bleeding
-exports['bcc-corehud']:ToggleUI()
+exports['bcc-corehud']:ToggleUI(bool) -- Hides UI. 
 ```
 
 ### Server exports
