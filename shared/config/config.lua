@@ -120,6 +120,7 @@ Config.EnableMoneyCore          = true -- Displays current money amount
 Config.EnableGoldCore           = true -- Displays gold balance
 Config.EnableExpCore            = true -- Displays experience value
 Config.EnableTokensCore         = true -- Displays tokens or premium points
+Config.EnablePlayerIdCore = true   -- show ID  player in HUD
 
 -- Logo / watermark indicator
 Config.EnableLogoCore           = true                                      -- Set true to show a draggable logo slot
