@@ -65,6 +65,20 @@ Config.StarvationDamageDelay    = 120.0                                  -- Seco
 Config.StarvationDamageInterval = 10.0                                   -- Seconds between health damage ticks once starvation damage begins
 Config.StarvationDamageAmount   = 3                                      -- Health removed each tick when starving/dehydrated (set 0 to disable)
 
+-- Damage for Thirst or Hunger
+Config.DamageForHunger = true     
+-- Enables or disables damage to the player when hunger reaches 0.
+-- If set to false, the player will NOT lose health from zero hunger.
+Config.DamageForThirst = false    
+-- Enables or disables damage to the player when thirst reaches 0.
+-- If set to false, the player will NOT lose health from zero thirst.
+Config.HungerDamageAmount = 20.0  
+-- Amount of damage applied per cycle when hunger is at 0.
+-- This value is applied continuously while hunger remains at 0.
+Config.ThirstDamageAmount = 50.0  
+-- Amount of damage applied per cycle when thirst is at 0.
+-- This value is applied continuously while thirst remains at 0.
+
 -- Voice indicator
 Config.EnableVoiceCore          = true                             -- Toggle the voice range core
 Config.VoiceMaxRange            = 50.0                             -- Maximum voice range (in metres) used to normalise the ring
