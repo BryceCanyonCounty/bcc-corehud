@@ -2053,10 +2053,14 @@ CreateThread(function()
 				end
 
 				local playerIdInner, playerIdOuter, playerIdNext
-				local serverId = GetPlayerServerId(PlayerId())
-				if serverId ~= nil then
-					playerIdInner, playerIdOuter = 15, 99
-					playerIdNext = 'ID ' .. tostring(serverId)
+
+				if Config.EnablePlayerIdCore then
+					local serverId = GetPlayerServerId(PlayerId())
+					print("Server ID:", GetPlayerServerId(PlayerId()))
+					if serverId and serverId > 0 then
+						playerIdInner, playerIdOuter = 15, 99
+						playerIdNext = 'ID ' .. tostring(serverId)
+					end
 				end
 
 				local logoInner, logoOuter, logoMeta
