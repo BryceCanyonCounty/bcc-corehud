@@ -1696,30 +1696,54 @@ CreateThread(function()
 			end
 
 			if C.starvationDamageAmount > 0.0 then
-				if isHungerEmpty and isThirstEmpty then
+				local totalDmg = 0.0
+
+				if Config.DamageForHunger and isHungerEmpty then
+					totalDmg = totalDmg + (Config.HungerDamageAmount or C.starvationDamageAmount)
+				end
+
+				if Config.DamageForThirst and isThirstEmpty then
+					totalDmg = totalDmg + (Config.ThirstDamageAmount or C.starvationDamageAmount)
+				end
+
+				if totalDmg > 0.0 then
 					starvationElapsed, starvationTimer, starvationDelaySatisfied = 0.0, 0.0, true
+
 					if ped ~= 0 and not IsEntityDead(ped) then
-						local dmg = math.floor(C.starvationDamageAmount + 0.5)
+						local dmg = math.floor(totalDmg + 0.5)
+
 						if dmg > 0 then
 							local currentHealth = GetEntityHealth(ped)
+
 							if currentHealth ~= nil then
 								if Config.DoHealthPainSound then
 									PlayPain(ped, 9, 1, true, true)
 								end
+
 								local nextHealth = math.max(0, currentHealth - dmg)
 								SetEntityHealth(ped, nextHealth, 0)
-								if Config.DoHealthDamageFx then AnimpostfxPlay('MP_Downed') end
+
+								if Config.DoHealthDamageFx then
+									AnimpostfxPlay('MP_Downed')
+								end
 							end
 						end
 					end
 				else
 					starvationElapsed, starvationTimer, starvationDelaySatisfied = 0.0, 0.0, false
-					if Config.DoHealthDamageFx then AnimpostfxStop('MP_Downed') end
+
+					if Config.DoHealthDamageFx then
+						AnimpostfxStop('MP_Downed')
+					end
 				end
 			else
 				starvationElapsed, starvationTimer, starvationDelaySatisfied = 0.0, 0.0, false
-				if Config.DoHealthDamageFx then AnimpostfxStop('MP_Downed') end
+
+				if Config.DoHealthDamageFx then
+					AnimpostfxStop('MP_Downed')
+				end
 			end
+
 
 			local isHot = false
 			if ped ~= 0 and not IsEntityDead(ped) then
