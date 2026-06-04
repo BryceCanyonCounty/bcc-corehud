@@ -1,33 +1,3 @@
-<1.9.0>
-## New Additions
-- Added more options to hide the HUD during screen fade-in/fade-out and similar transitions.  
-- Added new images for the bleeding core.  
-- Changed the money icon.  
-- Updated the default layout configuration for improved positioning and balance.  
-
-## Code Changes
-- Removed some redundant code for cleaner performance and easier maintenance.  
-
-## 🐛 Bug Fixes
-- Fixed logo not showing.  
-- Fixed bleeding core display issue.  
-- Stopped all visual FX when entity is dead.  
-- Fixed horse icon visibility when horse is dirty.  
-- Fixed activity multiplayer issues.  
-- Fixed mailbox core icon not showing when receiving mail.  
-- Removed additional redundant code.
-<1.8.0>
-- Added a bleed core with medical integration, including configurable polling, notifications, UI slot, state syncing, and README docs.
-- Expanded consumable QoL: returning empty bottles, documenting give support, and reshaping client/server exports and RPC notes.
-- Enhanced cleanliness and bleed alerts via the shared Notify helper and updated README highlights plus configuration guidance.
-- Centered layout save UI, allowed immediate saving, adjusted Font Awesome icon sizing, and rebuilt the NUI after each change.
-<1.7.0>
-- Hide CoreHUD automatically while `vorp_inventory` is open and restore it when closed.  
-- Pulse icons for **Health**, **Stamina**, **Hunger**, **Thirst**, and **Clean** when their value falls below **30%** to provide clear visual warning.  
-- Improve stress UX: add new stress icons and make `commandHeal` reduce/clear stress as part of the healing flow.
-<1.6.1>
-- Added overfeed notification message  
-- Fixed issue where health would not drain when hunger and thirst reached 0  
-- Changed starvation logic to run by tick instead of timers for smoother updates  
-- Fixed various HUD visual effects  
-- Added an empty bottle icon when thirst is depleted
+<1.9.2>
+- Removed client print (Server ID: x)
+- version bump
