@@ -2080,7 +2080,7 @@ CreateThread(function()
 
 				if Config.EnablePlayerIdCore then
 					local serverId = GetPlayerServerId(PlayerId())
-					print("Server ID:", GetPlayerServerId(PlayerId()))
+					--print("Server ID:", GetPlayerServerId(PlayerId()))
 					if serverId and serverId > 0 then
 						playerIdInner, playerIdOuter = 15, 99
 						playerIdNext = 'ID ' .. tostring(serverId)
